@@ -109,7 +109,10 @@ tr:hover td{background:var(--bg2)}
 .week-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .week-nav .lbl{font-weight:800;font-size:14.5px;flex:1;text-align:center}
 .day-card{border:1px solid var(--bd);border-radius:var(--r);padding:12px;margin-bottom:10px}
-.day-card h3{font-size:13.5px;font-weight:800;margin-bottom:8px;text-transform:capitalize}
+.day-card h3{font-size:13.5px;font-weight:800;margin-bottom:8px;text-transform:capitalize;display:flex;align-items:center;gap:6px}
+.day-card.especial{border-color:var(--amber);border-width:2px;background:var(--am2)}
+.card.especial{border-color:var(--amber);border-width:2px}
+.pill.especial{background:var(--amber);color:#fff}
 .opt{display:flex;align-items:flex-start;gap:10px;padding:13px 12px;border:1px solid var(--bd);border-radius:var(--r);margin-bottom:8px;cursor:pointer;min-height:44px}
 .opt:hover{background:var(--bg2)}
 .opt.sel{border-color:var(--blue);background:var(--bl2)}
@@ -333,8 +336,11 @@ function renderTrabajadorBody(wrap){
   const diasConMenu = DIAS.filter(d=>menusSemana.some(m=>m.dia===d));
   diasConMenu.forEach(dia=>{
     const opciones = menusSemana.filter(m=>m.dia===dia);
-    const card = el('div',{class:'day-card'});
-    card.appendChild(el('h3',{}, `${dia} · ${fechaDia(state.semanaRef,dia).split('-').reverse().join('-')}`));
+    const especial = esDiaEspecial(opciones);
+    const card = el('div',{class:'day-card'+(especial?' especial':'')});
+    const h3 = el('h3',{}, `${dia} · ${fechaDia(state.semanaRef,dia).split('-').reverse().join('-')}`);
+    if(especial) h3.appendChild(el('span',{class:'pill especial'},'🌟 Almuerzo mejorado'));
+    card.appendChild(h3);
     const actual = misPedidos.find(p=>p.dia===dia);
     opciones.forEach(o=>{
       const isSel = actual && String(actual.opcion)===String(o.opcion);
@@ -390,6 +396,7 @@ function renderTrabajadorBody(wrap){
   wrap.appendChild(resumen);
 }
 function normRut(r){ return String(r||'').toLowerCase().replace(/\.|-|\s/g,'').trim(); }
+function esDiaEspecial(opciones){ return opciones.some(o=>String(o.especial||'').toLowerCase()==='si'); }
 
 // ============================================================
 // ADMIN
@@ -547,13 +554,29 @@ function renderAdminMenu(){
 
   const semana = iso(state.semanaRef);
   DIAS.forEach(dia=>{
-    const card = el('div',{class:'card'});
-    const head = el('div',{class:'row',style:'justify-content:space-between'});
-    head.appendChild(el('h2',{}, dia));
-    card.appendChild(head);
-
     const opciones = state.data.menus.filter(m=>m.semana===semana && m.dia===dia);
     opciones.sort((a,b)=>String(a.opcion).localeCompare(String(b.opcion)));
+    const especial = esDiaEspecial(opciones);
+    const card = el('div',{class:'card'+(especial?' especial':'')});
+    const head = el('div',{class:'row',style:'justify-content:space-between'});
+    head.appendChild(el('h2',{}, dia + (especial?' 🌟':'')));
+    if(opciones.length){
+      const lblEsp = el('label',{style:'display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--amber);cursor:pointer'});
+      const chkEsp = el('input',{type:'checkbox'});
+      chkEsp.checked = especial;
+      lblEsp.append(chkEsp, document.createTextNode('🌟 Almuerzo mejorado este día'));
+      chkEsp.onchange = async ()=>{
+        chkEsp.disabled = true;
+        const res = await callApi({action:'marcarDiaEspecial', semana, dia, especial:chkEsp.checked});
+        chkEsp.disabled = false;
+        if(res.ok){
+          opciones.forEach(o=>o.especial = chkEsp.checked ? 'Si':'No');
+          render();
+        } else { chkEsp.checked = !chkEsp.checked; alert(res.error||'Error'); }
+      };
+      head.appendChild(lblEsp);
+    }
+    card.appendChild(head);
     opciones.forEach(o=>{
       const r = el('div',{class:'row',style:'align-items:flex-start'});
       const codeField = el('div',{class:'field',style:'max-width:70px'});
@@ -603,7 +626,7 @@ function renderAdminMenu(){
       btnAdd.disabled=true;
       const res = await callApi({action:'guardarMenu', data:{semana,dia,opcion,descripcion}});
       btnAdd.disabled=false;
-      if(res.ok){ state.data.menus.push({semana,dia,opcion,descripcion,activo:'Si'}); render(); }
+      if(res.ok){ state.data.menus.push({semana,dia,opcion,descripcion,activo:'Si',especial:especial?'Si':'No'}); render(); }
       else alert(res.error||'Error');
     };
     addRow.append(codeField2, descField2, btnAdd);
@@ -642,12 +665,14 @@ function renderAdminReportes(){
   const rutsAnotados = new Set(pedidosSemana.map(p=>normRut(p.rut)));
   const anotados = elegibles.filter(t=>rutsAnotados.has(normRut(t.rut)));
   const noAnotados = elegibles.filter(t=>!rutsAnotados.has(normRut(t.rut)));
+  const diasEspeciales = new Set(DIAS.filter(d=>esDiaEspecial(menusSemana.filter(m=>m.dia===d))));
+  const anotadosEnEspeciales = pedidosSemana.filter(p=>diasEspeciales.has(p.dia)).length;
 
   const toolbar = el('div',{class:'toolbar no-print'});
   const btnPdf = el('button',{class:'btn'},'📄 Exportar / imprimir PDF');
   btnPdf.onclick = ()=>window.print();
   const btnCsv = el('button',{class:'btn'},'⬇️ Exportar CSV');
-  btnCsv.onclick = ()=>exportarCsv(semana, elegibles, pedidosSemana, menusSemana);
+  btnCsv.onclick = ()=>exportarCsv(semana, elegibles, pedidosSemana, menusSemana, diasEspeciales);
   toolbar.append(btnPdf, btnCsv);
   box.appendChild(toolbar);
 
@@ -655,6 +680,7 @@ function renderAdminReportes(){
   stats.appendChild(statBox(elegibles.length,'Trabajadores vigentes',''));
   stats.appendChild(statBox(anotados.length,'Anotados','ok'));
   stats.appendChild(statBox(noAnotados.length,'Sin anotarse','no'));
+  if(diasEspeciales.size) stats.appendChild(statBox(anotadosEnEspeciales,'🌟 Anotados en almuerzo mejorado',''));
   box.appendChild(stats);
 
   if(!menusSemana.length){
@@ -668,7 +694,7 @@ function renderAdminReportes(){
   const tbl = el('table',{});
   const diasConMenu = DIAS.filter(d=>menusSemana.some(m=>m.dia===d));
   const headTr = el('tr',{}); headTr.appendChild(el('th',{},'Opción'));
-  diasConMenu.forEach(d=>headTr.appendChild(el('th',{},d)));
+  diasConMenu.forEach(d=>headTr.appendChild(el('th',{}, d + (diasEspeciales.has(d)?' 🌟':''))));
   tbl.appendChild(headTr);
   const codigos = Array.from(new Set(menusSemana.map(m=>m.opcion))).sort();
   codigos.forEach(cod=>{
@@ -692,8 +718,8 @@ function renderAdminReportes(){
   box.appendChild(resumenCard);
 
   const gridBox = el('div',{class:'grid2'});
-  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, true, pedidosSemana, diasConMenu));
-  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, false, pedidosSemana, diasConMenu));
+  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, true, pedidosSemana, diasConMenu, diasEspeciales));
+  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, false, pedidosSemana, diasConMenu, diasEspeciales));
   box.appendChild(gridBox);
 
   return box;
@@ -701,14 +727,14 @@ function renderAdminReportes(){
 function statBox(n,label,cls){
   return el('div',{class:'stat '+(cls||'')}, el('div',{class:'n'},String(n)), el('div',{class:'l'},label));
 }
-function personListCard(title, list, showOptions, pedidosSemana, dias){
+function personListCard(title, list, showOptions, pedidosSemana, dias, diasEspeciales){
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',{},title));
   if(!list.length){ card.appendChild(el('div',{class:'empty'},'Sin registros.')); return card; }
   const twrap = el('div',{class:'tbl-wrap'});
   const tbl = el('table',{});
   const head = el('tr',{}); ['Nombre','RUT'].forEach(h=>head.appendChild(el('th',{},h)));
-  if(showOptions) dias.forEach(d=>head.appendChild(el('th',{},d.slice(0,3))));
+  if(showOptions) dias.forEach(d=>head.appendChild(el('th',{}, d.slice(0,3) + (diasEspeciales&&diasEspeciales.has(d)?' 🌟':''))));
   tbl.appendChild(head);
   list.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
     const tr = el('tr',{});
@@ -726,9 +752,10 @@ function personListCard(title, list, showOptions, pedidosSemana, dias){
   card.appendChild(twrap);
   return card;
 }
-function exportarCsv(semana, elegibles, pedidosSemana, menusSemana){
+function exportarCsv(semana, elegibles, pedidosSemana, menusSemana, diasEspeciales){
   const dias = DIAS.filter(d=>menusSemana.some(m=>m.dia===d));
-  const rows = [['Nombre','RUT','Tipo', ...dias]];
+  const encabezadosDias = dias.map(d=>d + (diasEspeciales&&diasEspeciales.has(d)?' (mejorado)':''));
+  const rows = [['Nombre','RUT','Tipo', ...encabezadosDias]];
   elegibles.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
     const row = [t.nombre, t.rut, t.tipo];
     dias.forEach(d=>{

@@ -8,10 +8,12 @@
 //     - Activo: "Si" o "No"
 //     - FechaInicio / FechaFin: solo se usan para Tipo=Spot (rango de vigencia,
 //       formato AAAA-MM-DD). Si estan vacias, se considera vigente siempre.
-//   Menus: Semana | Dia | Opcion | Descripcion | Activo
+//   Menus: Semana | Dia | Opcion | Descripcion | Activo | Especial
 //     - Semana: fecha del lunes de esa semana, formato AAAA-MM-DD
 //     - Dia: Lunes, Martes, Miercoles, Jueves, Viernes
 //     - Opcion: A, B, C...
+//     - Especial: "Si" o "No" - marca un dia como almuerzo mejorado (para
+//       destacarlo y llevar registro de quienes se anotaron ese dia)
 //   Pedidos: ID | Semana | RUT | Nombre | Dia | Opcion | Timestamp
 //     - Un trabajador solo puede tener UNA fila por (Semana, RUT, Dia): al
 //       guardar un pedido para un dia ya elegido, se reemplaza la opcion en
@@ -69,6 +71,8 @@ function procesarAccionCol(body) {
       return guardarMenuCol(body.data);
     case 'eliminarMenu':
       return eliminarMenuCol(body.semana, body.dia, body.opcion);
+    case 'marcarDiaEspecial':
+      return marcarDiaEspecialCol(body.semana, body.dia, body.especial);
     case 'copiarMenuSemana':
       return copiarMenuSemanaCol(body.semanaOrigen, body.semanaDestino);
     case 'guardarPedido':
@@ -206,21 +210,50 @@ function guardarMenuCol(data) {
   if (!data || !data.semana || !data.dia || !data.opcion) return { ok: false, error: 'Faltan datos del menu' };
   const h = getHojaCol(HOJAS_COL.MENUS);
   const v = h.getDataRange().getValues();
-  const fila = [
-    data.semana, data.dia, data.opcion,
-    data.descripcion || '',
-    data.activo === false ? 'No' : 'Si'
-  ];
   for (let i = 1; i < v.length; i++) {
     if (mismaFechaCol(v[i][0], data.semana) &&
         String(v[i][1]).trim() === String(data.dia).trim() &&
         String(v[i][2]).trim() === String(data.opcion).trim()) {
+      const fila = [
+        data.semana, data.dia, data.opcion,
+        data.descripcion || '',
+        data.activo === false ? 'No' : 'Si'
+      ];
       h.getRange(i + 1, 1, 1, fila.length).setValues([fila]);
       return { ok: true, actualizado: true };
     }
   }
-  h.appendRow(fila);
+  // Una opcion nueva hereda el estado "especial" que ya tenga ese dia
+  // (si otras opciones del mismo dia estan marcadas como almuerzo mejorado).
+  let especialDelDia = 'No';
+  for (let i = 1; i < v.length; i++) {
+    if (mismaFechaCol(v[i][0], data.semana) && String(v[i][1]).trim() === String(data.dia).trim() && String(v[i][5]).trim() === 'Si') {
+      especialDelDia = 'Si';
+      break;
+    }
+  }
+  h.appendRow([
+    data.semana, data.dia, data.opcion,
+    data.descripcion || '',
+    data.activo === false ? 'No' : 'Si',
+    especialDelDia
+  ]);
   return { ok: true, creado: true };
+}
+function marcarDiaEspecialCol(semana, dia, especial) {
+  if (!semana || !dia) return { ok: false, error: 'Faltan datos del dia' };
+  const h = getHojaCol(HOJAS_COL.MENUS);
+  const v = h.getDataRange().getValues();
+  const valor = especial ? 'Si' : 'No';
+  let actualizadas = 0;
+  for (let i = 1; i < v.length; i++) {
+    if (mismaFechaCol(v[i][0], semana) && String(v[i][1]).trim() === String(dia).trim()) {
+      h.getRange(i + 1, 6).setValue(valor);
+      actualizadas++;
+    }
+  }
+  if (!actualizadas) return { ok: false, error: 'Primero define al menos una opcion para ese dia.' };
+  return { ok: true, actualizadas: actualizadas };
 }
 function eliminarMenuCol(semana, dia, opcion) {
   const h = getHojaCol(HOJAS_COL.MENUS);
@@ -243,7 +276,7 @@ function copiarMenuSemanaCol(semanaOrigen, semanaDestino) {
   const nuevasFilas = [];
   for (let i = 1; i < v.length; i++) {
     if (mismaFechaCol(v[i][0], semanaOrigen)) {
-      nuevasFilas.push([semanaDestino, v[i][1], v[i][2], v[i][3], v[i][4]]);
+      nuevasFilas.push([semanaDestino, v[i][1], v[i][2], v[i][3], v[i][4], v[i][5] || 'No']);
       copiadas++;
     }
   }
@@ -323,7 +356,7 @@ function crearHojasIniciales() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const specs = {
     Trabajadores: ['RUT', 'Nombre', 'Tipo', 'Activo', 'FechaInicio', 'FechaFin', 'Notas'],
-    Menus: ['Semana', 'Dia', 'Opcion', 'Descripcion', 'Activo'],
+    Menus: ['Semana', 'Dia', 'Opcion', 'Descripcion', 'Activo', 'Especial'],
     Pedidos: ['ID', 'Semana', 'RUT', 'Nombre', 'Dia', 'Opcion', 'Timestamp'],
     Config: ['Clave', 'Valor']
   };
@@ -337,4 +370,16 @@ function crearHojasIniciales() {
   const yaTiene = v.slice(1).some(f => String(f[0]).toLowerCase().trim() === 'admin_password');
   if (!yaTiene) cfg.appendRow(['admin_password', 'cambiar123']);
   Logger.log('Hojas listas. Recuerda cambiar la clave admin_password en la hoja Config.');
+}
+// Ejecutar UNA VEZ si tu hoja "Menus" ya existia antes de que se agregara la
+// columna "Especial" (almuerzo mejorado). Agrega el encabezado si falta.
+function agregarColumnaEspecial() {
+  const h = getHojaCol(HOJAS_COL.MENUS);
+  const encabezado = h.getRange(1, 1, 1, Math.max(6, h.getLastColumn())).getValues()[0];
+  if (String(encabezado[5] || '').trim().toLowerCase() === 'especial') {
+    Logger.log('La columna Especial ya existe.');
+    return;
+  }
+  h.getRange(1, 6).setValue('Especial');
+  Logger.log('Columna "Especial" agregada en Menus!F1.');
 }
