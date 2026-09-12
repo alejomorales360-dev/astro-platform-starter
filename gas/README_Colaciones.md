@@ -17,6 +17,8 @@ junto con este sitio en Netlify (queda disponible en `/colaciones/`).
     que solo reciben colación durante un rango de fechas puntual) indicando
     fecha de inicio y fin de vigencia.
   - Definir el menú de cada día de la semana (varias opciones, ej. A/B/C).
+  - Marcar un día como **🌟 Almuerzo mejorado** para destacarlo y llevar
+    registro de quiénes se anotaron ese día en particular.
   - Copiar el menú de la semana anterior como punto de partida.
   - Ver reportes: quién se anotó y quién no, resumen de opciones elegidas
     por día, exportar a CSV/Excel y exportar/imprimir en PDF (botón que usa
@@ -73,6 +75,14 @@ actualiza la URL `/exec` ya publicada. Hay que ir a
 implementación de tipo "Aplicación web", elegir **Nueva versión** en
 "Versión" y presionar **Implementar**. La URL `/exec` no cambia, así que no
 hay que tocar `GAS_URL` de nuevo.
+
+## Si tu planilla ya existía antes del "Almuerzo mejorado"
+
+La hoja `Menus` ahora tiene una columna extra `Especial` (Si/No). Si creaste
+tu planilla antes de este cambio y no aparece, ejecuta una vez desde el
+editor de Apps Script la función **`agregarColumnaEspecial`** — agrega el
+encabezado que falta en `Menus!F1` sin tocar tus datos existentes. Después
+de eso, recuerda subir la nueva versión de la implementación (ver más abajo).
 
 ## Diagnóstico rápido
 
