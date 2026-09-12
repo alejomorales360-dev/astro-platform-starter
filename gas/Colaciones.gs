@@ -110,6 +110,11 @@ function formatearFechaCol(v) {
   if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   return String(v || '').trim();
 }
+// Compara una celda (que Sheets puede haber convertido a Date) contra un
+// texto plano tipo 'AAAA-MM-DD', normalizando ambos lados igual.
+function mismaFechaCol(celda, texto) {
+  return formatearFechaCol(celda) === formatearFechaCol(texto);
+}
 function hojaAObjetosCol(nombreHoja) {
   const h = getHojaCol(nombreHoja);
   const v = h.getDataRange().getValues();
@@ -207,7 +212,7 @@ function guardarMenuCol(data) {
     data.activo === false ? 'No' : 'Si'
   ];
   for (let i = 1; i < v.length; i++) {
-    if (String(v[i][0]).trim() === String(data.semana).trim() &&
+    if (mismaFechaCol(v[i][0], data.semana) &&
         String(v[i][1]).trim() === String(data.dia).trim() &&
         String(v[i][2]).trim() === String(data.opcion).trim()) {
       h.getRange(i + 1, 1, 1, fila.length).setValues([fila]);
@@ -221,7 +226,7 @@ function eliminarMenuCol(semana, dia, opcion) {
   const h = getHojaCol(HOJAS_COL.MENUS);
   const v = h.getDataRange().getValues();
   for (let i = 1; i < v.length; i++) {
-    if (String(v[i][0]).trim() === String(semana).trim() &&
+    if (mismaFechaCol(v[i][0], semana) &&
         String(v[i][1]).trim() === String(dia).trim() &&
         String(v[i][2]).trim() === String(opcion).trim()) {
       h.deleteRow(i + 1);
@@ -237,7 +242,7 @@ function copiarMenuSemanaCol(semanaOrigen, semanaDestino) {
   let copiadas = 0;
   const nuevasFilas = [];
   for (let i = 1; i < v.length; i++) {
-    if (String(v[i][0]).trim() === String(semanaOrigen).trim()) {
+    if (mismaFechaCol(v[i][0], semanaOrigen)) {
       nuevasFilas.push([semanaDestino, v[i][1], v[i][2], v[i][3], v[i][4]]);
       copiadas++;
     }
@@ -259,7 +264,7 @@ function guardarPedidoCol(data) {
   const rn = normalizarRutCol(data.rut);
   const ahora = new Date().toISOString();
   for (let i = 1; i < v.length; i++) {
-    if (String(v[i][1]).trim() === String(data.semana).trim() &&
+    if (mismaFechaCol(v[i][1], data.semana) &&
         normalizarRutCol(v[i][2]) === rn &&
         String(v[i][4]).trim() === String(data.dia).trim()) {
       h.getRange(i + 1, 6, 1, 2).setValues([[data.opcion, ahora]]);
@@ -275,7 +280,7 @@ function eliminarPedidoCol(semana, rut, dia) {
   const v = h.getDataRange().getValues();
   const rn = normalizarRutCol(rut);
   for (let i = 1; i < v.length; i++) {
-    if (String(v[i][1]).trim() === String(semana).trim() &&
+    if (mismaFechaCol(v[i][1], semana) &&
         normalizarRutCol(v[i][2]) === rn &&
         String(v[i][4]).trim() === String(dia).trim()) {
       h.deleteRow(i + 1);
