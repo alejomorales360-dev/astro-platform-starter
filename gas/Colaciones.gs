@@ -10,7 +10,7 @@
 //       formato AAAA-MM-DD). Si estan vacias, se considera vigente siempre.
 //   Menus: Semana | Dia | Opcion | Descripcion | Activo
 //     - Semana: fecha del lunes de esa semana, formato AAAA-MM-DD
-//     - Dia: Lunes, Martes, Miercoles, Jueves, Viernes, Sabado
+//     - Dia: Lunes, Martes, Miercoles, Jueves, Viernes
 //     - Opcion: A, B, C...
 //   Pedidos: ID | Semana | RUT | Nombre | Dia | Opcion | Timestamp
 //     - Un trabajador solo puede tener UNA fila por (Semana, RUT, Dia): al
