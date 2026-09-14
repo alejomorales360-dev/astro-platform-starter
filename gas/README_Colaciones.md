@@ -20,9 +20,15 @@ junto con este sitio en Netlify (queda disponible en `/colaciones/`).
   - Marcar un día como **🌟 Almuerzo mejorado** para destacarlo y llevar
     registro de quiénes se anotaron ese día en particular.
   - Copiar el menú de la semana anterior como punto de partida.
+  - Configurar el **cierre de inscripciones** (por defecto, el miércoles de
+    la semana previa a las 14:30): pasado ese plazo, los trabajadores ya no
+    pueden elegir ni cambiar su opción para esa semana; queda bloqueado y
+    solo administración puede seguir editando.
   - Ver reportes: quién se anotó y quién no, resumen de opciones elegidas
     por día, exportar a CSV/Excel y exportar/imprimir en PDF (botón que usa
     la función de impresión del navegador con una vista lista para PDF).
+    Desde ahí mismo, administración puede fijar o corregir la opción de
+    cualquier persona en cualquier momento (incluso con el plazo cerrado).
 
 ## 1. Crear la planilla y las hojas
 
@@ -83,6 +89,14 @@ tu planilla antes de este cambio y no aparece, ejecuta una vez desde el
 editor de Apps Script la función **`agregarColumnaEspecial`** — agrega el
 encabezado que falta en `Menus!F1` sin tocar tus datos existentes. Después
 de eso, recuerda subir la nueva versión de la implementación (ver más abajo).
+
+## Si tu planilla ya existía antes del cierre configurable
+
+Ejecuta una vez desde el editor de Apps Script la función
+**`agregarConfigCierre`** — agrega en la hoja `Config` las claves
+`cierre_dias_antes` (5) y `cierre_hora` (14:30) si no existen, sin tocar tus
+datos. Después puedes cambiarlas directamente en `Config` o desde el panel
+de administración (pestaña Menú semanal → "Cierre de inscripciones").
 
 ## Diagnóstico rápido
 
