@@ -72,7 +72,12 @@ button{cursor:pointer}
 .btn.ghost{border-color:transparent;background:transparent}
 .btn.sm{padding:7px 11px;font-size:12.5px;min-height:36px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-.card{background:var(--bg);border:1px solid var(--bd);border-radius:var(--rl);padding:18px;box-shadow:var(--sh);margin-bottom:14px}
+.card{background:var(--bg);border:1px solid var(--bd);border-left:5px solid var(--bd2);border-radius:var(--rl);padding:18px;box-shadow:var(--sh);margin-bottom:20px}
+.card.tone-ok{border-left-color:var(--green);background:linear-gradient(180deg,var(--gr2) 0%,var(--bg) 90px)}
+.card.tone-ok h2{color:var(--gr3)}
+.card.tone-no{border-left-color:var(--red);background:linear-gradient(180deg,var(--rd2) 0%,var(--bg) 90px)}
+.card.tone-no h2{color:var(--red)}
+.card tr:nth-child(even) td{background:rgba(0,0,0,.02)}
 .card h2{font-size:14px;text-transform:uppercase;letter-spacing:.4px;color:var(--t2);margin-bottom:12px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 label{font-size:12.5px;color:var(--t2);font-weight:600;display:block;margin-bottom:4px}
@@ -84,7 +89,7 @@ textarea{resize:vertical;min-height:56px}
 .tab{padding:8px 14px;border-radius:20px;border:1px solid var(--bd2);background:var(--bg);font-weight:700;font-size:13px;white-space:nowrap;color:var(--t2)}
 .tab.active{background:var(--blue);border-color:var(--blue);color:#fff}
 table{width:100%;border-collapse:collapse;font-size:13.5px}
-th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--bd)}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--bd);vertical-align:top}
 th{color:var(--t2);font-size:11.5px;text-transform:uppercase;letter-spacing:.3px}
 tr:hover td{background:var(--bg2)}
 .tbl-wrap{overflow-x:auto}
@@ -128,13 +133,13 @@ tr:hover td{background:var(--bg2)}
 .stat.ok .n{color:var(--gr3)}
 .stat.no .n{color:var(--red)}
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:720px){.grid2{grid-template-columns:1fr}}
 @media print{
   .no-print{display:none!important}
   body{background:#fff;color:#000;font-size:12px}
   .wrap{max-width:100%;padding:0}
-  .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid;padding:12px;margin-bottom:10px}
+  .card{box-shadow:none;border:1px solid #ccc;background:#fff!important;break-inside:avoid;padding:12px;margin-bottom:10px}
+  .card.tone-ok{border-left:4px solid #2e7d32}
+  .card.tone-no{border-left:4px solid #c0392b}
   .card h2{color:#000}
   .stat-row{break-inside:avoid}
   table{font-size:11px}
@@ -142,8 +147,6 @@ tr:hover td{background:var(--bg2)}
   tr{break-inside:avoid}
   .pill{border:1px solid #999;background:#fff!important;color:#000!important}
   .pill.especial{border-color:#000}
-  .grid2{display:block}
-  .grid2 > .card{margin-bottom:14px}
 }
 </style>
 </head>
@@ -874,10 +877,8 @@ function renderAdminReportes(){
   desgloseCard.appendChild(dwrap);
   box.appendChild(desgloseCard);
 
-  const gridBox = el('div',{class:'grid2'});
-  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia));
-  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia));
-  box.appendChild(gridBox);
+  box.appendChild(personListCard(`✅ Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, 'ok'));
+  box.appendChild(personListCard(`⚠️ Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, 'no'));
 
   const editando = elegibles.find(t=>normRut(t.rut)===state.editandoRut);
   if(editando) box.appendChild(renderEditorPedido(editando, pedidosSemana, diasConMenu, menusPorDia, semana));
@@ -891,8 +892,8 @@ function statBox(n,label,cls){
 // fila tiene un botón "✏️" para abrir el panel de edición de esa persona
 // (ver renderEditorPedido) en vez de mostrar un <select> por día y por
 // persona, que con muchos trabajadores se vuelve pesado y feo de imprimir.
-function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusPorDia){
-  const card = el('div',{class:'card'});
+function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusPorDia, tono){
+  const card = el('div',{class:'card'+(tono?' tone-'+tono:'')});
   card.appendChild(el('h2',{},title));
   if(!list.length){ card.appendChild(el('div',{class:'empty'},'Sin registros.')); return card; }
   const twrap = el('div',{class:'tbl-wrap'});
