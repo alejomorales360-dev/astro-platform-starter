@@ -111,6 +111,10 @@ tr:hover td{background:var(--bg2)}
 .opt.locked{cursor:default;opacity:.7}
 .opt.locked:hover{background:none}
 .center{display:flex;align-items:center;justify-content:center;min-height:100dvh;padding:20px}
+.modal-fullscreen{position:fixed;inset:0;z-index:200;background:var(--bg);overflow-y:auto;padding:20px 16px}
+.modal-fullscreen .hdr-modal{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--bd)}
+.modal-fullscreen .hdr-modal h2{font-size:16px;text-transform:none;letter-spacing:0;color:var(--blue);margin-bottom:0}
+.modal-fullscreen-body{max-width:520px;margin:0 auto}
 .login-card{background:var(--bg);border-radius:var(--rl);box-shadow:var(--sh);padding:28px 24px;max-width:380px;width:100%}
 .login-card h1{font-size:19px;font-weight:800;color:var(--blue);margin-bottom:4px}
 .login-card p.sub{font-size:13px;color:var(--t2);margin-bottom:20px}
@@ -938,13 +942,14 @@ function personListCard(title, list, pedidosSemana, dias, diasEspeciales, tono){
 // pedido de UNA persona en cualquier momento, incluso si el plazo normal
 // de inscripción ya cerró.
 function renderEditorPedido(persona, pedidosSemana, dias, menusPorDia, semana){
-  const card = el('div',{class:'card no-print',style:'border-color:var(--blue);border-width:2px'});
-  const head = el('div',{class:'row',style:'justify-content:space-between'});
-  head.appendChild(el('h2',{}, `Editar pedido: ${persona.nombre} (${persona.rut})`));
+  const modal = el('div',{class:'modal-fullscreen no-print'});
+  const body = el('div',{class:'modal-fullscreen-body'});
+  const head = el('div',{class:'hdr-modal'});
+  head.appendChild(el('h2',{}, `✏️ Editar pedido: ${persona.nombre} (${persona.rut})`));
   const btnCerrar = el('button',{class:'btn sm'},'✕ Cerrar');
   btnCerrar.onclick = ()=>{ state.editandoRut=null; render(); };
   head.appendChild(btnCerrar);
-  card.appendChild(head);
+  body.appendChild(head);
   dias.forEach(d=>{
     const opciones = menusPorDia[d]||[];
     const actual = pedidosSemana.find(x=>normRut(x.rut)===normRut(persona.rut) && x.dia===d);
@@ -977,9 +982,10 @@ function renderEditorPedido(persona, pedidosSemana, dias, menusPorDia, semana){
       } else alert(res.error||'Error');
     };
     row.appendChild(sel);
-    card.appendChild(row);
+    body.appendChild(row);
   });
-  return card;
+  modal.appendChild(body);
+  return modal;
 }
 // Exporta un solo .xlsx con 4 hojas: resumen a gran escala (por opción),
 // desglose por nombre de plato, y el registro de personas (anotados y sin
