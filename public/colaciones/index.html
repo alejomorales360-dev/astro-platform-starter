@@ -179,7 +179,9 @@ const state = {
   editandoRut: null,   // RUT en edición en Reportes (null = nadie)
   forzarEdicionMenu: false, // admin desbloqueó edición del menú tras el cierre
   abiertoCierre: false,     // acordeón "Cierre de inscripciones" abierto
-  abiertoCatalogo: false    // acordeón "Catálogo de platos" abierto
+  abiertoCatalogo: false,   // acordeón "Catálogo de platos" abierto
+  periodoDesde: iso(addDays(mondayOf(new Date()), -21)),
+  periodoHasta: iso(addDays(mondayOf(new Date()), 4))
 };
 
 // ---------- fechas ----------
@@ -490,7 +492,7 @@ function renderAdmin(){
   const wrap = el('div',{class:'wrap'});
 
   const tabs = el('div',{class:'tabs no-print'});
-  const defs = [['trabajadores','Trabajadores'],['menu','Menú semanal'],['reportes','Reportes']];
+  const defs = [['trabajadores','Trabajadores'],['menu','Menú semanal'],['reportes','Reportes'],['periodo','Reporte por periodo']];
   defs.forEach(([key,label])=>{
     const t = el('button',{class:'tab'+(state.adminTab===key?' active':'')}, label);
     t.onclick = ()=>{ state.adminTab=key; state.editandoRut=null; state.forzarEdicionMenu=false; render(); };
@@ -501,6 +503,7 @@ function renderAdmin(){
   if(state.adminTab==='trabajadores') wrap.appendChild(renderAdminTrabajadores());
   if(state.adminTab==='menu') wrap.appendChild(renderAdminMenu());
   if(state.adminTab==='reportes') wrap.appendChild(renderAdminReportes());
+  if(state.adminTab==='periodo') wrap.appendChild(renderAdminPeriodo());
 
   root.appendChild(wrap);
   return root;
@@ -827,6 +830,28 @@ function renderAdminMenu(){
 }
 
 // ---- Admin: Reportes ----
+// Calcula todos los datos de una semana (elegibles, anotados, sin
+// anotarse, días especiales, etc.) a partir de su lunes en ISO. Se usa
+// tanto en Reportes (una semana) como en el Reporte por periodo (varias).
+function datosSemana(semanaIso){
+  const semanaRef = new Date(semanaIso+'T00:00:00');
+  const finSemana = iso(addDays(semanaRef,4));
+  const menusSemana = state.data.menus.filter(m=>m.semana===semanaIso);
+  const pedidosSemana = state.data.pedidos.filter(p=>p.semana===semanaIso);
+  const elegibles = state.data.trabajadores.filter(t=>{
+    if(String(t.activo).toLowerCase()!=='si') return false;
+    if(String(t.tipo)!=='Spot') return true;
+    const ini = t.fechainicio || '0000-01-01';
+    const fin = t.fechafin || '9999-12-31';
+    return ini <= finSemana && fin >= semanaIso;
+  });
+  const rutsAnotados = new Set(pedidosSemana.map(p=>normRut(p.rut)));
+  const anotados = elegibles.filter(t=>rutsAnotados.has(normRut(t.rut)));
+  const noAnotados = elegibles.filter(t=>!rutsAnotados.has(normRut(t.rut)));
+  const diasEspeciales = new Set(DIAS.filter(d=>esDiaEspecial(menusSemana.filter(m=>m.dia===d))));
+  const pedidosEspeciales = pedidosSemana.filter(p=>diasEspeciales.has(p.dia)).length;
+  return {semana:semanaIso, menusSemana, pedidosSemana, elegibles, anotados, noAnotados, diasEspeciales, pedidosEspeciales};
+}
 function renderAdminReportes(){
   const box = el('div',{});
   const nav = el('div',{class:'week-nav no-print'});
@@ -839,24 +864,9 @@ function renderAdminReportes(){
   box.appendChild(nav);
 
   const semana = iso(state.semanaRef);
-  const finSemana = iso(addDays(state.semanaRef,4));
-  const menusSemana = state.data.menus.filter(m=>m.semana===semana);
-  const pedidosSemana = state.data.pedidos.filter(p=>p.semana===semana);
-
-  // trabajadores vigentes esta semana: fijos activos + spot cuya vigencia cruza la semana
-  const elegibles = state.data.trabajadores.filter(t=>{
-    if(String(t.activo).toLowerCase()!=='si') return false;
-    if(String(t.tipo)!=='Spot') return true;
-    const ini = t.fechainicio || '0000-01-01';
-    const fin = t.fechafin || '9999-12-31';
-    return ini <= finSemana && fin >= semana;
-  });
-
-  const rutsAnotados = new Set(pedidosSemana.map(p=>normRut(p.rut)));
-  const anotados = elegibles.filter(t=>rutsAnotados.has(normRut(t.rut)));
-  const noAnotados = elegibles.filter(t=>!rutsAnotados.has(normRut(t.rut)));
-  const diasEspeciales = new Set(DIAS.filter(d=>esDiaEspecial(menusSemana.filter(m=>m.dia===d))));
-  const anotadosEnEspeciales = pedidosSemana.filter(p=>diasEspeciales.has(p.dia)).length;
+  const sd = datosSemana(semana);
+  const {menusSemana, pedidosSemana, elegibles, anotados, noAnotados, diasEspeciales} = sd;
+  const anotadosEnEspeciales = sd.pedidosEspeciales;
 
   const toolbar = el('div',{class:'toolbar no-print'});
   const btnPdf = el('button',{class:'btn'},'📄 Exportar / imprimir PDF');
@@ -1085,6 +1095,176 @@ function exportarExcel(semana, anotados, noAnotados, pedidosSemana, menusSemana,
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasSinAnotar), 'Sin anotarse');
 
   XLSX.writeFile(wb, `colaciones_${semana}.xlsx`);
+}
+
+// ---- Admin: Reporte por periodo ----
+// Junta los datos de cada semana (datosSemana) dentro de un rango de
+// fechas elegido a mano, para ver totales de varias semanas juntas en
+// vez de semana por semana.
+function semanasEnPeriodo(desdeIso, hastaIso){
+  const semanas = [];
+  let cursor = mondayOf(new Date(desdeIso+'T00:00:00'));
+  const limite = new Date(hastaIso+'T00:00:00');
+  let guarda = 0;
+  while(cursor <= limite && guarda < 260){ // tope de seguridad: 5 años
+    semanas.push(iso(cursor));
+    cursor = addDays(cursor,7);
+    guarda++;
+  }
+  return semanas;
+}
+function renderAdminPeriodo(){
+  const box = el('div',{});
+  const filtroCard = el('div',{class:'card no-print'});
+  filtroCard.appendChild(el('h2',{},'Rango de fechas'));
+  const row = el('div',{class:'row',style:'align-items:flex-end'});
+  const fDesde = el('div',{class:'field',style:'max-width:170px'});
+  fDesde.appendChild(el('label',{},'Desde'));
+  const inpDesde = el('input',{type:'date',value:state.periodoDesde});
+  fDesde.appendChild(inpDesde);
+  const fHasta = el('div',{class:'field',style:'max-width:170px'});
+  fHasta.appendChild(el('label',{},'Hasta'));
+  const inpHasta = el('input',{type:'date',value:state.periodoHasta});
+  fHasta.appendChild(inpHasta);
+  const btnVer = el('button',{class:'btn primary',style:'margin-bottom:12px'},'Ver periodo');
+  btnVer.onclick = ()=>{
+    if(!inpDesde.value || !inpHasta.value || inpDesde.value > inpHasta.value){
+      alert('Revisa las fechas: "Desde" debe ser anterior o igual a "Hasta".');
+      return;
+    }
+    state.periodoDesde = inpDesde.value;
+    state.periodoHasta = inpHasta.value;
+    render();
+  };
+  row.append(fDesde, fHasta, btnVer);
+  filtroCard.appendChild(row);
+  box.appendChild(filtroCard);
+
+  const semanas = semanasEnPeriodo(state.periodoDesde, state.periodoHasta);
+  const datosPorSemana = semanas.map(s=>datosSemana(s));
+  const conMenu = datosPorSemana.filter(d=>d.menusSemana.length);
+
+  const titRango = el('div',{class:'msg info'},
+    `📅 Periodo: ${fmtFechaCorta(state.periodoDesde)} al ${fmtFechaCorta(state.periodoHasta)} (${semanas.length} semana${semanas.length===1?'':'s'}, ${conMenu.length} con menú publicado).`);
+  box.appendChild(titRango);
+
+  if(!conMenu.length){
+    box.appendChild(el('div',{class:'card'}, el('div',{class:'empty'},'No hay menús publicados en este periodo.')));
+    return box;
+  }
+
+  const totalColaciones = datosPorSemana.reduce((s,d)=>s+d.pedidosSemana.length,0);
+  const totalMejoradas = datosPorSemana.reduce((s,d)=>s+d.pedidosEspeciales,0);
+  const totalAnotados = datosPorSemana.reduce((s,d)=>s+d.anotados.length,0);
+  const totalNoAnotados = datosPorSemana.reduce((s,d)=>s+d.noAnotados.length,0);
+
+  // Quiénes no se anotaron dentro del periodo: cada persona aparece una vez,
+  // con cuántas semanas del periodo le faltó anotarse.
+  const faltasPorRut = new Map();
+  datosPorSemana.forEach(d=>{
+    d.noAnotados.forEach(t=>{
+      const clave = normRut(t.rut);
+      if(!faltasPorRut.has(clave)) faltasPorRut.set(clave, {nombre:t.nombre, rut:t.rut, tipo:t.tipo, semanas:[]});
+      faltasPorRut.get(clave).semanas.push(d.semana);
+    });
+  });
+  const listaFaltas = Array.from(faltasPorRut.values()).sort((a,b)=>
+    b.semanas.length - a.semanas.length || String(a.nombre).localeCompare(String(b.nombre)));
+
+  const toolbar = el('div',{class:'toolbar no-print'});
+  const btnPdf = el('button',{class:'btn'},'📄 Exportar / imprimir PDF');
+  btnPdf.onclick = ()=>window.print();
+  const btnXls = el('button',{class:'btn'},'⬇️ Exportar Excel');
+  btnXls.onclick = ()=>exportarExcelPeriodo(state.periodoDesde, state.periodoHasta, datosPorSemana, listaFaltas);
+  toolbar.append(btnPdf, btnXls);
+  box.appendChild(toolbar);
+
+  const stats = el('div',{class:'stat-row'});
+  stats.appendChild(statBox(totalColaciones,'Colaciones en el periodo',''));
+  stats.appendChild(statBox(totalMejoradas,'🌟 Colaciones mejoradas',''));
+  stats.appendChild(statBox(totalAnotados,'Anotados (suma semanas)','ok'));
+  stats.appendChild(statBox(totalNoAnotados,'Sin anotarse (suma semanas)','no'));
+  box.appendChild(stats);
+
+  const detalleCard = el('div',{class:'card'});
+  detalleCard.appendChild(el('h2',{},'Detalle por semana'));
+  const dwrap = el('div',{class:'tbl-wrap'});
+  const dtbl = el('table',{});
+  const dhead = el('tr',{});
+  ['Semana','Elegibles','Anotados','Sin anotarse','Colaciones','🌟 Mejoradas'].forEach(h=>dhead.appendChild(el('th',{},h)));
+  dtbl.appendChild(dhead);
+  conMenu.forEach(d=>{
+    const tr = el('tr',{});
+    tr.appendChild(el('td',{}, fmtFechaCorta(d.semana)));
+    tr.appendChild(el('td',{}, String(d.elegibles.length)));
+    tr.appendChild(el('td',{}, String(d.anotados.length)));
+    tr.appendChild(el('td',{}, String(d.noAnotados.length)));
+    tr.appendChild(el('td',{}, String(d.pedidosSemana.length)));
+    tr.appendChild(el('td',{}, String(d.pedidosEspeciales)));
+    dtbl.appendChild(tr);
+  });
+  dwrap.appendChild(dtbl);
+  detalleCard.appendChild(dwrap);
+  box.appendChild(detalleCard);
+
+  const faltasCard = el('div',{class:'card tone-no'});
+  faltasCard.appendChild(el('h2',{},`⚠️ Quiénes no se anotaron en el periodo (${listaFaltas.length})`));
+  if(!listaFaltas.length){
+    faltasCard.appendChild(el('div',{class:'empty'},'Todos se anotaron todas las semanas de este periodo. 🎉'));
+  } else {
+    const fwrap = el('div',{class:'tbl-wrap'});
+    const ftbl = el('table',{});
+    const fhead = el('tr',{}); ['Nombre','RUT','Semanas sin anotarse'].forEach(h=>fhead.appendChild(el('th',{},h)));
+    ftbl.appendChild(fhead);
+    listaFaltas.forEach(f=>{
+      const tr = el('tr',{});
+      tr.appendChild(el('td',{}, f.nombre + (f.tipo==='Spot'?' 🔸':'')));
+      tr.appendChild(el('td',{}, f.rut));
+      tr.appendChild(el('td',{}, `${f.semanas.length} de ${conMenu.length} — ` + f.semanas.map(fmtFechaCorta).join(', ')));
+      ftbl.appendChild(tr);
+    });
+    fwrap.appendChild(ftbl);
+    faltasCard.appendChild(fwrap);
+  }
+  box.appendChild(faltasCard);
+
+  return box;
+}
+function fmtFechaCorta(fechaIso){
+  const [y,m,d] = fechaIso.split('-');
+  return `${d}-${m}-${y}`;
+}
+function exportarExcelPeriodo(desde, hasta, datosPorSemana, listaFaltas){
+  const conMenu = datosPorSemana.filter(d=>d.menusSemana.length);
+  const wb = XLSX.utils.book_new();
+
+  const totalColaciones = datosPorSemana.reduce((s,d)=>s+d.pedidosSemana.length,0);
+  const totalMejoradas = datosPorSemana.reduce((s,d)=>s+d.pedidosEspeciales,0);
+  const totalAnotados = datosPorSemana.reduce((s,d)=>s+d.anotados.length,0);
+  const totalNoAnotados = datosPorSemana.reduce((s,d)=>s+d.noAnotados.length,0);
+  const filasResumen = [
+    ['Periodo', `${fmtFechaCorta(desde)} al ${fmtFechaCorta(hasta)}`],
+    ['Semanas con menú publicado', conMenu.length],
+    ['Colaciones en el periodo', totalColaciones],
+    ['Colaciones mejoradas', totalMejoradas],
+    ['Anotados (suma semanas)', totalAnotados],
+    ['Sin anotarse (suma semanas)', totalNoAnotados]
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasResumen), 'Resumen periodo');
+
+  const filasDetalle = [['Semana','Elegibles','Anotados','Sin anotarse','Colaciones','Mejoradas']];
+  conMenu.forEach(d=>{
+    filasDetalle.push([fmtFechaCorta(d.semana), d.elegibles.length, d.anotados.length, d.noAnotados.length, d.pedidosSemana.length, d.pedidosEspeciales]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasDetalle), 'Detalle por semana');
+
+  const filasFaltas = [['Nombre','RUT','Tipo','N° semanas sin anotarse','Semanas']];
+  listaFaltas.forEach(f=>{
+    filasFaltas.push([f.nombre, f.rut, f.tipo, f.semanas.length, f.semanas.map(fmtFechaCorta).join(', ')]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasFaltas), 'Sin anotarse');
+
+  XLSX.writeFile(wb, `colaciones_periodo_${desde}_a_${hasta}.xlsx`);
 }
 
 // ---------- dom helper ----------
