@@ -95,6 +95,10 @@ tr:hover td{background:var(--bg2)}
 .msg{padding:10px 13px;border-radius:var(--r);font-size:13.5px;margin-bottom:12px}
 .msg.err{background:var(--rd2);color:var(--red)}
 .msg.ok{background:var(--gr2);color:var(--gr3)}
+.msg.info{background:var(--bl2);color:var(--bl3);font-weight:600}
+.msg.cerrado{background:var(--rd2);color:var(--red);font-weight:700}
+.opt.locked{cursor:default;opacity:.7}
+.opt.locked:hover{background:none}
 .center{display:flex;align-items:center;justify-content:center;min-height:100dvh;padding:20px}
 .login-card{background:var(--bg);border-radius:var(--rl);box-shadow:var(--sh);padding:28px 24px;max-width:380px;width:100%}
 .login-card h1{font-size:19px;font-weight:800;color:var(--blue);margin-bottom:4px}
@@ -170,6 +174,29 @@ function fmtSemana(d){
 function fechaDia(semanaMonday, diaNombre){
   const idx = DIAS.indexOf(diaNombre);
   return iso(addDays(semanaMonday, idx));
+}
+// Instante en que cierran las inscripciones de la semana cuyo lunes es
+// semanaMonday: "cierre_dias_antes" días antes, a las "cierre_hora".
+// Por defecto: miércoles de la semana previa a las 14:30. Debe coincidir
+// con calcularCierreCol() en gas/Colaciones.gs.
+function calcularCierre(semanaMonday, config){
+  config = config||{};
+  const diasAntes = Number(config.cierre_dias_antes);
+  const dias = isNaN(diasAntes) ? 5 : diasAntes;
+  const hora = String(config.cierre_hora || '14:30').trim();
+  const [hh,mm] = hora.split(':').map(n=>Number(n)||0);
+  const cierre = addDays(semanaMonday, -dias);
+  cierre.setHours(hh, mm, 0, 0);
+  return cierre;
+}
+function inscripcionesCerradas(semanaMonday, config){
+  return new Date() > calcularCierre(semanaMonday, config);
+}
+function fmtCierre(d){
+  const opt = {weekday:'long', day:'numeric', month:'long'};
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return `${d.toLocaleDateString('es-CL',opt)}, ${hh}:${mm} hrs`;
 }
 
 // ---------- API ----------
@@ -254,6 +281,7 @@ function renderLogin(){
     state.trabajador = res.trabajador;
     state.data.menus = res.menus||[];
     state.data.pedidos = res.pedidos||[];
+    state.data.config = res.config||{};
     render();
   };
   formT.querySelector('input').addEventListener('keydown', e=>{ if(e.key==='Enter') btnT.click(); });
@@ -329,6 +357,13 @@ function renderTrabajadorBody(wrap){
     return;
   }
 
+  const cerrado = inscripcionesCerradas(state.semanaRef, state.data.config);
+  if(cerrado){
+    wrap.appendChild(el('div',{class:'msg cerrado'}, `🔒 El plazo para anotarse a esta semana ya cerró (${fmtCierre(calcularCierre(state.semanaRef, state.data.config))}). Si necesitas cambiar tu elección, contacta a administración.`));
+  } else {
+    wrap.appendChild(el('div',{class:'msg info'}, `⏰ Puedes elegir o cambiar tu opción hasta el ${fmtCierre(calcularCierre(state.semanaRef, state.data.config))}.`));
+  }
+
   const diasConMenu = DIAS.filter(d=>menusSemana.some(m=>m.dia===d));
   diasConMenu.forEach(dia=>{
     const opciones = menusSemana.filter(m=>m.dia===dia);
@@ -340,9 +375,10 @@ function renderTrabajadorBody(wrap){
     const actual = misPedidos.find(p=>p.dia===dia);
     opciones.forEach(o=>{
       const isSel = actual && String(actual.opcion)===String(o.opcion);
-      const optEl = el('label',{class:'opt'+(isSel?' sel':'')});
+      const optEl = el('label',{class:'opt'+(isSel?' sel':'')+(cerrado?' locked':'')});
       const radio = el('input',{type:'radio', name:'dia_'+dia});
       radio.checked = isSel;
+      radio.disabled = cerrado;
       optEl.appendChild(radio);
       const txt = el('div',{class:'txt'});
       txt.appendChild(el('span',{class:'code'}, o.opcion+':'));
@@ -350,7 +386,7 @@ function renderTrabajadorBody(wrap){
       optEl.appendChild(txt);
       optEl.onclick = async (e)=>{
         e.preventDefault();
-        if(isSel) return;
+        if(isSel || cerrado) return;
         optEl.style.opacity=.6;
         const res = await callApi({action:'guardarPedido', data:{
           semana, rut: state.trabajador.rut, nombre: state.trabajador.nombre, dia, opcion:o.opcion
@@ -420,6 +456,47 @@ function renderAdmin(){
 }
 
 // ---- Admin: Trabajadores ----
+function renderCierreConfigCard(){
+  const card = el('div',{class:'card no-print'});
+  card.appendChild(el('h2',{},'Cierre de inscripciones'));
+  const row = el('div',{class:'row',style:'align-items:flex-end'});
+  const fDias = el('div',{class:'field',style:'max-width:180px'});
+  fDias.appendChild(el('label',{},'Días antes del lunes'));
+  const inpDias = el('input',{type:'text',inputmode:'numeric',value:String(state.data.config.cierre_dias_antes ?? 5)});
+  fDias.appendChild(inpDias);
+  const fHora = el('div',{class:'field',style:'max-width:140px'});
+  fHora.appendChild(el('label',{},'Hora de cierre'));
+  const inpHora = el('input',{type:'text',placeholder:'14:30',value:String(state.data.config.cierre_hora || '14:30')});
+  fHora.appendChild(inpHora);
+  const btnGuardar = el('button',{class:'btn primary',style:'margin-bottom:12px'},'Guardar');
+  const msgBox = el('div',{style:'flex-basis:100%'});
+  btnGuardar.onclick = async ()=>{
+    const dias = parseInt(inpDias.value,10);
+    const hora = inpHora.value.trim();
+    if(isNaN(dias) || dias<0 || !/^\d{1,2}:\d{2}$/.test(hora)){
+      msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'},'Revisa los días (número) y la hora (HH:MM).'));
+      return;
+    }
+    btnGuardar.disabled = true;
+    const r1 = await callApi({action:'guardarConfig', clave:'cierre_dias_antes', valor:dias});
+    const r2 = await callApi({action:'guardarConfig', clave:'cierre_hora', valor:hora});
+    btnGuardar.disabled = false;
+    msgBox.innerHTML='';
+    if(r1.ok && r2.ok){
+      state.data.config.cierre_dias_antes = dias;
+      state.data.config.cierre_hora = hora;
+      render();
+    } else {
+      msgBox.appendChild(el('div',{class:'msg err'}, r1.error||r2.error||'No se pudo guardar.'));
+    }
+  };
+  row.append(fDias, fHora, btnGuardar, msgBox);
+  card.appendChild(row);
+  const dias = Number(state.data.config.cierre_dias_antes ?? 5);
+  card.appendChild(el('div',{style:'font-size:12.5px;color:var(--t2)'},
+    `Con estos valores, cada semana se cierra ${dias} día${dias===1?'':'s'} antes de su lunes, a la hora indicada. Después de eso, los trabajadores ya no pueden elegir ni cambiar su opción; solo administración puede seguir editando pedidos de esa semana.`));
+  return card;
+}
 function renderAdminTrabajadores(){
   const box = el('div',{});
   const form = el('div',{class:'card no-print'});
@@ -522,6 +599,7 @@ function renderAdminTrabajadores(){
 // ---- Admin: Menú semanal ----
 function renderAdminMenu(){
   const box = el('div',{});
+  box.appendChild(renderCierreConfigCard());
   const nav = el('div',{class:'week-nav no-print'});
   const prev = el('button',{class:'btn sm'},'‹');
   const lbl = el('div',{class:'lbl'}, fmtSemana(state.semanaRef));
@@ -530,6 +608,11 @@ function renderAdminMenu(){
   next.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,7); render(); };
   nav.append(prev,lbl,next);
   box.appendChild(nav);
+
+  const cerrado = inscripcionesCerradas(state.semanaRef, state.data.config);
+  box.appendChild(el('div',{class:`msg ${cerrado?'cerrado':'info'}`},
+    (cerrado ? '🔒 Inscripciones cerradas para esta semana desde el ' : '⏰ Inscripciones abiertas para esta semana hasta el ')
+    + fmtCierre(calcularCierre(state.semanaRef, state.data.config)) + '.'));
 
   const toolbar = el('div',{class:'toolbar no-print'});
   const btnCopiar = el('button',{class:'btn'},'Copiar menú de la semana anterior');
@@ -713,9 +796,12 @@ function renderAdminReportes(){
   resumenCard.appendChild(twrap);
   box.appendChild(resumenCard);
 
+  const menusPorDia = {};
+  diasConMenu.forEach(d=>{ menusPorDia[d] = menusSemana.filter(m=>m.dia===d).sort((a,b)=>String(a.opcion).localeCompare(String(b.opcion))); });
+
   const gridBox = el('div',{class:'grid2'});
-  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, true, pedidosSemana, diasConMenu, diasEspeciales));
-  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, false, pedidosSemana, diasConMenu, diasEspeciales));
+  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, semana));
+  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, semana));
   box.appendChild(gridBox);
 
   return box;
@@ -723,25 +809,55 @@ function renderAdminReportes(){
 function statBox(n,label,cls){
   return el('div',{class:'stat '+(cls||'')}, el('div',{class:'n'},String(n)), el('div',{class:'l'},label));
 }
-function personListCard(title, list, showOptions, pedidosSemana, dias, diasEspeciales){
+// Lista de trabajadores con selects editables por día: la administración
+// puede fijar o cambiar la opción de cualquier persona en cualquier
+// momento, incluso si el plazo normal de inscripción ya cerró.
+function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusPorDia, semana){
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',{},title));
   if(!list.length){ card.appendChild(el('div',{class:'empty'},'Sin registros.')); return card; }
   const twrap = el('div',{class:'tbl-wrap'});
   const tbl = el('table',{});
   const head = el('tr',{}); ['Nombre','RUT'].forEach(h=>head.appendChild(el('th',{},h)));
-  if(showOptions) dias.forEach(d=>head.appendChild(el('th',{}, d.slice(0,3) + (diasEspeciales&&diasEspeciales.has(d)?' 🌟':''))));
+  dias.forEach(d=>head.appendChild(el('th',{}, d.slice(0,3) + (diasEspeciales&&diasEspeciales.has(d)?' 🌟':''))));
   tbl.appendChild(head);
   list.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
     const tr = el('tr',{});
     tr.appendChild(el('td',{},t.nombre + (t.tipo==='Spot'?' 🔸':'')));
     tr.appendChild(el('td',{},t.rut));
-    if(showOptions){
-      dias.forEach(d=>{
-        const p = pedidosSemana.find(x=>normRut(x.rut)===normRut(t.rut) && x.dia===d);
-        tr.appendChild(el('td',{}, p?p.opcion:'—'));
+    dias.forEach(d=>{
+      const opciones = menusPorDia[d]||[];
+      const actual = pedidosSemana.find(x=>normRut(x.rut)===normRut(t.rut) && x.dia===d);
+      const td = el('td',{});
+      const sel = el('select',{style:'min-width:110px;padding:6px 7px;font-size:12.5px'});
+      sel.appendChild(el('option',{value:''},'— Sin elegir'));
+      opciones.forEach(o=>{
+        const opt = el('option',{value:o.opcion}, `${o.opcion}: ${o.descripcion||''}`);
+        if(actual && String(actual.opcion)===String(o.opcion)) opt.selected = true;
+        sel.appendChild(opt);
       });
-    }
+      if(!actual) sel.value = '';
+      sel.onchange = async ()=>{
+        sel.disabled = true;
+        const opcion = sel.value;
+        const res = opcion
+          ? await callApi({action:'guardarPedido', data:{semana, rut:t.rut, nombre:t.nombre, dia:d, opcion, asAdmin:true}})
+          : await callApi({action:'eliminarPedido', semana, rut:t.rut, dia:d, asAdmin:true});
+        sel.disabled = false;
+        if(res.ok){
+          const idx = state.data.pedidos.findIndex(p=>p.semana===semana && p.dia===d && normRut(p.rut)===normRut(t.rut));
+          if(opcion){
+            const nuevo = {semana, rut:t.rut, nombre:t.nombre, dia:d, opcion, timestamp:new Date().toISOString()};
+            if(idx>=0) state.data.pedidos[idx]=nuevo; else state.data.pedidos.push(nuevo);
+          } else if(idx>=0){
+            state.data.pedidos.splice(idx,1);
+          }
+          render();
+        } else alert(res.error||'Error');
+      };
+      td.appendChild(sel);
+      tr.appendChild(td);
+    });
     tbl.appendChild(tr);
   });
   twrap.appendChild(tbl);

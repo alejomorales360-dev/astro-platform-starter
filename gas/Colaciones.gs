@@ -20,6 +20,14 @@
 //       vez de crear una fila nueva (evita anotaciones dobles).
 //   Config: Clave | Valor
 //     - admin_password: clave de acceso del panel de administracion
+//     - cierre_dias_antes: cuantos dias antes del lunes de la semana se
+//       cierran las inscripciones (por defecto 5 = miercoles de la semana
+//       previa). Editable desde el panel de administracion.
+//     - cierre_hora: hora de cierre ese dia, formato HH:MM (por defecto
+//       "14:30"). Editable desde el panel de administracion.
+//     Pasado ese plazo, los trabajadores ya no pueden elegir ni cambiar su
+//     opcion para esa semana: solo la administracion puede seguir editando
+//     pedidos de esa semana (guardarPedido con asAdmin:true).
 
 const HOJAS_COL = {
   TRABAJADORES: 'Trabajadores',
@@ -78,7 +86,9 @@ function procesarAccionCol(body) {
     case 'guardarPedido':
       return guardarPedidoCol(body.data);
     case 'eliminarPedido':
-      return eliminarPedidoCol(body.semana, body.rut, body.dia);
+      return eliminarPedidoCol(body.semana, body.rut, body.dia, body.asAdmin);
+    case 'guardarConfig':
+      return actualizarConfigCol(body.clave, body.valor);
     default:
       return { ok: false, error: 'Accion no reconocida: ' + body.action };
   }
@@ -155,6 +165,40 @@ function obtenerConfigCol() {
   } catch (err) {
     return {};
   }
+}
+function actualizarConfigCol(clave, valor) {
+  if (!clave) return { ok: false, error: 'Falta la clave de configuracion' };
+  const h = getHojaCol(HOJAS_COL.CONFIG);
+  const v = h.getDataRange().getValues();
+  for (let i = 1; i < v.length; i++) {
+    if (String(v[i][0]).toLowerCase().trim() === String(clave).toLowerCase().trim()) {
+      h.getRange(i + 1, 2).setValue(valor);
+      return { ok: true };
+    }
+  }
+  h.appendRow([clave, valor]);
+  return { ok: true, creado: true };
+}
+// Calcula el instante (Date) en que se cierran las inscripciones de una
+// semana: "cierre_dias_antes" dias antes del lunes de esa semana, a la hora
+// "cierre_hora". Por defecto: miercoles de la semana previa a las 14:30.
+function calcularCierreCol(semana, cfg) {
+  cfg = cfg || obtenerConfigCol();
+  const diasAntes = Number(cfg.cierre_dias_antes);
+  const dias = isNaN(diasAntes) ? 5 : diasAntes;
+  const hora = String(cfg.cierre_hora || '14:30').trim();
+  const partes = hora.split(':');
+  const hh = Number(partes[0]) || 0;
+  const mm = Number(partes[1]) || 0;
+  const partesSemana = String(semana).split('-').map(Number);
+  const lunes = new Date(partesSemana[0], (partesSemana[1] || 1) - 1, partesSemana[2] || 1);
+  const cierre = new Date(lunes);
+  cierre.setDate(cierre.getDate() - dias);
+  cierre.setHours(hh, mm, 0, 0);
+  return cierre;
+}
+function inscripcionesCerradasCol(semana, cfg) {
+  return new Date() > calcularCierreCol(semana, cfg);
 }
 
 // --- ADMIN LOGIN ---
@@ -292,6 +336,9 @@ function guardarPedidoCol(data) {
   if (!data || !data.semana || !data.rut || !data.dia || !data.opcion) {
     return { ok: false, error: 'Faltan datos del pedido' };
   }
+  if (!data.asAdmin && inscripcionesCerradasCol(data.semana)) {
+    return { ok: false, error: 'El plazo para anotarse a esta semana ya cerro. Si necesitas hacer un cambio, contacta a administracion.', cerrado: true };
+  }
   const h = getHojaCol(HOJAS_COL.PEDIDOS);
   const v = h.getDataRange().getValues();
   const rn = normalizarRutCol(data.rut);
@@ -308,7 +355,10 @@ function guardarPedidoCol(data) {
   h.appendRow([id, data.semana, data.rut, data.nombre || '', data.dia, data.opcion, ahora]);
   return { ok: true, creado: true, id: id };
 }
-function eliminarPedidoCol(semana, rut, dia) {
+function eliminarPedidoCol(semana, rut, dia, asAdmin) {
+  if (!asAdmin && inscripcionesCerradasCol(semana)) {
+    return { ok: false, error: 'El plazo para anotarse a esta semana ya cerro. Si necesitas hacer un cambio, contacta a administracion.', cerrado: true };
+  }
   const h = getHojaCol(HOJAS_COL.PEDIDOS);
   const v = h.getDataRange().getValues();
   const rn = normalizarRutCol(rut);
@@ -338,7 +388,8 @@ function loginTrabajadorCol(rutIngresado) {
     ok: true,
     trabajador: { rut: String(t.rut), nombre: String(t.nombre), tipo: String(t.tipo || 'Fijo') },
     menus: hojaAObjetosCol(HOJAS_COL.MENUS),
-    pedidos: misPedidos
+    pedidos: misPedidos,
+    config: obtenerConfigCol()
   };
 }
 
@@ -367,8 +418,10 @@ function crearHojasIniciales() {
   });
   const cfg = ss.getSheetByName('Config');
   const v = cfg.getDataRange().getValues();
-  const yaTiene = v.slice(1).some(f => String(f[0]).toLowerCase().trim() === 'admin_password');
-  if (!yaTiene) cfg.appendRow(['admin_password', 'cambiar123']);
+  const claves = v.slice(1).map(f => String(f[0]).toLowerCase().trim());
+  if (!claves.includes('admin_password')) cfg.appendRow(['admin_password', 'cambiar123']);
+  if (!claves.includes('cierre_dias_antes')) cfg.appendRow(['cierre_dias_antes', 5]);
+  if (!claves.includes('cierre_hora')) cfg.appendRow(['cierre_hora', '14:30']);
   Logger.log('Hojas listas. Recuerda cambiar la clave admin_password en la hoja Config.');
 }
 // Ejecutar UNA VEZ si tu hoja "Menus" ya existia antes de que se agregara la
@@ -382,4 +435,15 @@ function agregarColumnaEspecial() {
   }
   h.getRange(1, 6).setValue('Especial');
   Logger.log('Columna "Especial" agregada en Menus!F1.');
+}
+// Ejecutar UNA VEZ si tu planilla ya existia antes de que se agregara el
+// cierre de inscripciones configurable. Agrega las claves con sus valores
+// por defecto (5 dias antes del lunes, a las 14:30) si no existen.
+function agregarConfigCierre() {
+  const h = getHojaCol(HOJAS_COL.CONFIG);
+  const v = h.getDataRange().getValues();
+  const claves = v.slice(1).map(f => String(f[0]).toLowerCase().trim());
+  if (!claves.includes('cierre_dias_antes')) h.appendRow(['cierre_dias_antes', 5]);
+  if (!claves.includes('cierre_hora')) h.appendRow(['cierre_hora', '14:30']);
+  Logger.log('Config de cierre lista (cierre_dias_antes, cierre_hora).');
 }
