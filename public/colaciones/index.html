@@ -427,7 +427,7 @@ function renderTrabajadorBody(wrap){
     const actual = misPedidos.find(p=>p.dia===dia);
     opciones.forEach(o=>{
       const isSel = actual && String(actual.opcion)===String(o.opcion);
-      const optEl = el('label',{class:'opt'+(isSel?' sel':'')+(cerrado?' locked':'')});
+      const optEl = el('label',{class:'opt'+(isSel?' sel':'')+(cerrado?' locked':''), title: (isSel && !cerrado) ? 'Toca de nuevo para quitar tu elección' : ''});
       const radio = el('input',{type:'radio', name:'dia_'+dia});
       radio.checked = isSel;
       radio.disabled = cerrado;
@@ -436,20 +436,32 @@ function renderTrabajadorBody(wrap){
       txt.appendChild(el('span',{class:'code'}, o.opcion+':'));
       txt.appendChild(document.createTextNode(o.descripcion||''));
       optEl.appendChild(txt);
+      if(isSel && !cerrado) optEl.appendChild(el('span',{style:'font-size:11.5px;font-weight:700;color:var(--t2);white-space:nowrap'},'✕ Quitar'));
       optEl.onclick = async (e)=>{
         e.preventDefault();
-        if(isSel || cerrado) return;
+        if(cerrado) return;
         optEl.style.opacity=.6;
-        const res = await callApi({action:'guardarPedido', data:{
-          semana, rut: state.trabajador.rut, nombre: state.trabajador.nombre, dia, opcion:o.opcion
-        }});
-        if(res.ok){
-          const idx = state.data.pedidos.findIndex(p=>p.semana===semana && p.dia===dia && normRut(p.rut)===normRut(state.trabajador.rut));
-          const nuevo = {semana, rut:state.trabajador.rut, nombre:state.trabajador.nombre, dia, opcion:o.opcion, timestamp:new Date().toISOString()};
-          if(idx>=0) state.data.pedidos[idx]=nuevo; else state.data.pedidos.push(nuevo);
-          state.msg = {type:'ok', text:`Elegiste la opción ${o.opcion} para ${dia}.`};
+        const idx = state.data.pedidos.findIndex(p=>p.semana===semana && p.dia===dia && normRut(p.rut)===normRut(state.trabajador.rut));
+        if(isSel){
+          // Tocar la opción ya elegida la desmarca (queda sin elegir ese día).
+          const res = await callApi({action:'eliminarPedido', semana, rut:state.trabajador.rut, dia});
+          if(res.ok){
+            if(idx>=0) state.data.pedidos.splice(idx,1);
+            state.msg = {type:'ok', text:`Quitaste tu elección de ${dia}.`};
+          } else {
+            state.msg = {type:'err', text: res.error||'No se pudo quitar tu elección.'};
+          }
         } else {
-          state.msg = {type:'err', text: res.error||'No se pudo guardar tu elección.'};
+          const res = await callApi({action:'guardarPedido', data:{
+            semana, rut: state.trabajador.rut, nombre: state.trabajador.nombre, dia, opcion:o.opcion
+          }});
+          if(res.ok){
+            const nuevo = {semana, rut:state.trabajador.rut, nombre:state.trabajador.nombre, dia, opcion:o.opcion, timestamp:new Date().toISOString()};
+            if(idx>=0) state.data.pedidos[idx]=nuevo; else state.data.pedidos.push(nuevo);
+            state.msg = {type:'ok', text:`Elegiste la opción ${o.opcion} para ${dia}.`};
+          } else {
+            state.msg = {type:'err', text: res.error||'No se pudo guardar tu elección.'};
+          }
         }
         renderTrabajadorBody(wrap);
       };
