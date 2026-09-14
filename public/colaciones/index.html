@@ -176,7 +176,10 @@ const state = {
   semanaRef: mondayOf(new Date()),
   adminTab: 'trabajadores',
   msg: null,
-  editandoRut: null  // RUT en edición en Reportes (null = nadie)
+  editandoRut: null,   // RUT en edición en Reportes (null = nadie)
+  forzarEdicionMenu: false, // admin desbloqueó edición del menú tras el cierre
+  abiertoCierre: false,     // acordeón "Cierre de inscripciones" abierto
+  abiertoCatalogo: false    // acordeón "Catálogo de platos" abierto
 };
 
 // ---------- fechas ----------
@@ -250,7 +253,7 @@ function jsonp(body){
     const script = document.createElement('script');
     const params = new URLSearchParams();
     params.set('callback', cbName);
-    params.set('body', encodeURIComponent(JSON.stringify(body)));
+    if(body !== undefined) params.set('body', encodeURIComponent(JSON.stringify(body)));
     script.src = GAS_URL + '?' + params.toString();
     script.onerror = ()=>{ resolve({ok:false,error:'No se pudo conectar al servidor.'}); cleanup(); };
     document.body.appendChild(script);
@@ -332,16 +335,30 @@ function renderLogin(){
 }
 
 // ---------- shared header ----------
-function topHeader(title, who, onExit){
+function topHeader(title, who, onExit, onRefrescar){
   const hdr = el('div',{class:'hdr no-print'});
   const inn = el('div',{class:'hdr-in'});
   inn.appendChild(el('h1',{},title));
   if(who) inn.appendChild(el('span',{class:'who'}, who));
+  if(onRefrescar){
+    const btnRef = el('button',{class:'btn sm',title:'Actualizar datos'},'🔄');
+    btnRef.onclick = async ()=>{
+      btnRef.disabled = true; btnRef.textContent='…';
+      await onRefrescar();
+      btnRef.disabled = false; btnRef.textContent='🔄';
+    };
+    inn.appendChild(btnRef);
+  }
   const out = el('button',{class:'btn sm'},'Salir');
   out.onclick = onExit;
   inn.appendChild(out);
   hdr.appendChild(inn);
   return hdr;
+}
+// Vuelve a traer trabajadores/menus/pedidos/platos/config sin cerrar
+// sesión (para el botón 🔄 Actualizar del panel de admin).
+function fetchTodoAdmin(){
+  return fetch(GAS_URL).then(r=>r.json()).catch(()=> jsonp());
 }
 
 // ============================================================
@@ -466,14 +483,17 @@ function agregarPlatoLocal(nombre){
 // ============================================================
 function renderAdmin(){
   const root = el('div',{});
-  root.appendChild(topHeader('🍽️ Colaciones · Administración', '', ()=>{ state.role=null; state.admin=false; render(); }));
+  root.appendChild(topHeader('🍽️ Colaciones · Administración', '', ()=>{ state.role=null; state.admin=false; render(); }, async ()=>{
+    const res = await fetchTodoAdmin();
+    if(res.ok){ state.data = res; render(); } else alert(res.error||'No se pudo actualizar.');
+  }));
   const wrap = el('div',{class:'wrap'});
 
   const tabs = el('div',{class:'tabs no-print'});
   const defs = [['trabajadores','Trabajadores'],['menu','Menú semanal'],['reportes','Reportes']];
   defs.forEach(([key,label])=>{
     const t = el('button',{class:'tab'+(state.adminTab===key?' active':'')}, label);
-    t.onclick = ()=>{ state.adminTab=key; state.editandoRut=null; render(); };
+    t.onclick = ()=>{ state.adminTab=key; state.editandoRut=null; state.forzarEdicionMenu=false; render(); };
     tabs.appendChild(t);
   });
   wrap.appendChild(tabs);
@@ -486,10 +506,24 @@ function renderAdmin(){
   return root;
 }
 
-// ---- Admin: Trabajadores ----
-function renderCierreConfigCard(){
+// Tarjeta plegable genérica: header clicable con flecha, cuerpo se
+// construye solo si está abierta (evita ocupar espacio permanentemente).
+function renderAccordionCard(titulo, stateKey, buildBody){
+  const abierto = !!state[stateKey];
   const card = el('div',{class:'card no-print'});
-  card.appendChild(el('h2',{},'Cierre de inscripciones'));
+  const head = el('div',{class:'row',style:'justify-content:space-between;cursor:pointer;margin-bottom:0'});
+  head.appendChild(el('h2',{style:'margin-bottom:0'}, titulo));
+  head.appendChild(el('span',{style:'font-weight:800;color:var(--t2);font-size:12px'}, abierto?'▲ Ocultar':'▼ Mostrar'));
+  head.onclick = ()=>{ state[stateKey] = !abierto; render(); };
+  card.appendChild(head);
+  if(abierto){
+    const body = el('div',{style:'margin-top:14px'});
+    buildBody(body);
+    card.appendChild(body);
+  }
+  return card;
+}
+function buildCierreConfigBody(card){
   const row = el('div',{class:'row',style:'align-items:flex-end'});
   const fDias = el('div',{class:'field',style:'max-width:180px'});
   fDias.appendChild(el('label',{},'Días antes del lunes'));
@@ -526,17 +560,12 @@ function renderCierreConfigCard(){
   const dias = Number(state.data.config.cierre_dias_antes ?? 5);
   card.appendChild(el('div',{style:'font-size:12.5px;color:var(--t2)'},
     `Con estos valores, cada semana se cierra ${dias} día${dias===1?'':'s'} antes de su lunes, a la hora indicada. Después de eso, los trabajadores ya no pueden elegir ni cambiar su opción; solo administración puede seguir editando pedidos de esa semana.`));
-  return card;
 }
-function renderCatalogoPlatosCard(){
-  const card = el('div',{class:'card no-print'});
-  const head = el('div',{class:'row',style:'justify-content:space-between;margin-bottom:0'});
-  head.appendChild(el('h2',{style:'margin-bottom:0'},`Catálogo de platos (${(state.data.platos||[]).length})`));
-  card.appendChild(head);
+function buildCatalogoPlatosBody(card){
   card.appendChild(el('div',{style:'font-size:12.5px;color:var(--t2);margin-bottom:10px'},
     'Cada plato nuevo que escribas al armar el menú queda guardado aquí, para elegirlo escribiendo solo unas letras la próxima vez (aparece como sugerencia en el campo Descripción).'));
   const platos = state.data.platos||[];
-  if(!platos.length){ card.appendChild(el('div',{class:'empty'},'Todavía no hay platos guardados.')); return card; }
+  if(!platos.length){ card.appendChild(el('div',{class:'empty'},'Todavía no hay platos guardados.')); return; }
   const chips = el('div',{style:'display:flex;flex-wrap:wrap;gap:6px'});
   platos.forEach(p=>{
     const chip = el('span',{class:'pill blue',style:'display:inline-flex;align-items:center;gap:6px;padding:5px 6px 5px 10px'});
@@ -553,8 +582,8 @@ function renderCatalogoPlatosCard(){
     chips.appendChild(chip);
   });
   card.appendChild(chips);
-  return card;
 }
+// ---- Admin: Trabajadores ----
 function renderAdminTrabajadores(){
   const box = el('div',{});
   const form = el('div',{class:'card no-print'});
@@ -660,24 +689,35 @@ function renderAdminMenu(){
   const datalist = el('datalist',{id:'platos-datalist'});
   (state.data.platos||[]).forEach(p=>datalist.appendChild(el('option',{value:p})));
   box.appendChild(datalist);
-  box.appendChild(renderCierreConfigCard());
-  box.appendChild(renderCatalogoPlatosCard());
+  box.appendChild(renderAccordionCard('⏰ Cierre de inscripciones', 'abiertoCierre', buildCierreConfigBody));
+  box.appendChild(renderAccordionCard(`📖 Catálogo de platos (${(state.data.platos||[]).length})`, 'abiertoCatalogo', buildCatalogoPlatosBody));
   const nav = el('div',{class:'week-nav no-print'});
   const prev = el('button',{class:'btn sm'},'‹');
   const lbl = el('div',{class:'lbl'}, fmtSemana(state.semanaRef));
   const next = el('button',{class:'btn sm'},'›');
-  prev.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,-7); render(); };
-  next.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,7); render(); };
+  prev.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,-7); state.forzarEdicionMenu=false; render(); };
+  next.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,7); state.forzarEdicionMenu=false; render(); };
   nav.append(prev,lbl,next);
   box.appendChild(nav);
 
   const cerrado = inscripcionesCerradas(state.semanaRef, state.data.config);
-  box.appendChild(el('div',{class:`msg ${cerrado?'cerrado':'info'}`},
+  const bloqueado = cerrado && !state.forzarEdicionMenu;
+  const bannerCierre = el('div',{class:`msg ${cerrado?'cerrado':'info'}`});
+  bannerCierre.appendChild(document.createTextNode(
     (cerrado ? '🔒 Inscripciones cerradas para esta semana desde el ' : '⏰ Inscripciones abiertas para esta semana hasta el ')
-    + fmtCierre(calcularCierre(state.semanaRef, state.data.config)) + '.'));
+    + fmtCierre(calcularCierre(state.semanaRef, state.data.config)) + '. '));
+  if(cerrado){
+    bannerCierre.appendChild(document.createTextNode(
+      bloqueado ? 'El menú de esta semana quedó bloqueado (no se puede cambiar ni borrar). ' : 'Edición del menú desbloqueada temporalmente. '));
+    const btnToggle = el('button',{class:'btn sm',style:'margin-left:6px'}, bloqueado ? '🔓 Editar de todas formas' : '🔒 Volver a bloquear');
+    btnToggle.onclick = ()=>{ state.forzarEdicionMenu = !state.forzarEdicionMenu; render(); };
+    bannerCierre.appendChild(btnToggle);
+  }
+  box.appendChild(bannerCierre);
 
   const toolbar = el('div',{class:'toolbar no-print'});
   const btnCopiar = el('button',{class:'btn'},'Copiar menú de la semana anterior');
+  btnCopiar.disabled = bloqueado;
   btnCopiar.onclick = async ()=>{
     const origen = iso(addDays(state.semanaRef,-7));
     const destino = iso(state.semanaRef);
@@ -705,6 +745,7 @@ function renderAdminMenu(){
       const lblEsp = el('label',{style:'display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--amber);cursor:pointer'});
       const chkEsp = el('input',{type:'checkbox'});
       chkEsp.checked = especial;
+      chkEsp.disabled = bloqueado;
       lblEsp.append(chkEsp, document.createTextNode('🌟 Almuerzo mejorado este día'));
       chkEsp.onchange = async ()=>{
         chkEsp.disabled = true;
@@ -728,8 +769,10 @@ function renderAdminMenu(){
       const descField = el('div',{class:'field'});
       descField.appendChild(el('label',{},'Descripción'));
       const inpDesc = el('input',{type:'text',value:o.descripcion||'',list:'platos-datalist',autocomplete:'off'});
+      inpDesc.disabled = bloqueado;
       descField.appendChild(inpDesc);
       const btnSave = el('button',{class:'btn sm primary',style:'margin-top:18px'},'Guardar');
+      btnSave.disabled = bloqueado;
       btnSave.onclick = async ()=>{
         btnSave.disabled=true;
         const descripcion = inpDesc.value.trim();
@@ -739,6 +782,7 @@ function renderAdminMenu(){
         else alert(res.error||'Error');
       };
       const btnDel = el('button',{class:'btn sm danger',style:'margin-top:18px'},'Quitar');
+      btnDel.disabled = bloqueado;
       btnDel.onclick = async ()=>{
         if(!confirm('¿Quitar esta opción del menú?')) return;
         btnDel.disabled=true;
@@ -755,12 +799,15 @@ function renderAdminMenu(){
     const codeField2 = el('div',{class:'field',style:'max-width:70px'});
     codeField2.appendChild(el('label',{},'Nueva opción'));
     const inpNewCode = el('input',{type:'text',value:nextCode,style:'text-align:center;font-weight:800',maxlength:'2'});
+    inpNewCode.disabled = bloqueado;
     codeField2.appendChild(inpNewCode);
     const descField2 = el('div',{class:'field'});
     descField2.appendChild(el('label',{},'Descripción'));
     const inpNewDesc = el('input',{type:'text',placeholder:'Ej: Pollo al horno con arroz',list:'platos-datalist',autocomplete:'off'});
+    inpNewDesc.disabled = bloqueado;
     descField2.appendChild(inpNewDesc);
     const btnAdd = el('button',{class:'btn green',style:'margin-bottom:12px'},'Agregar opción');
+    btnAdd.disabled = bloqueado;
     btnAdd.onclick = async ()=>{
       const opcion = inpNewCode.value.trim().toUpperCase();
       const descripcion = inpNewDesc.value.trim();
