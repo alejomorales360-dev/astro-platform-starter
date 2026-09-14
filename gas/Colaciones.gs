@@ -137,6 +137,15 @@ function formatearFechaCol(v) {
   if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   return String(v || '').trim();
 }
+// Timestamp en hora local (segun el huso horario configurado en el
+// proyecto de Apps Script / la planilla) en vez de UTC, para que la
+// columna Timestamp de Pedidos coincida con la hora real de Chile.
+// Si el huso horario del script esta mal configurado, este timestamp
+// seguira desfasado: revisar Configuracion del proyecto (icono de
+// engranaje) -> Zona horaria -> America/Santiago.
+function timestampLocalCol() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+}
 // Compara una celda (que Sheets puede haber convertido a Date) contra un
 // texto plano tipo 'AAAA-MM-DD', normalizando ambos lados igual.
 function mismaFechaCol(celda, texto) {
@@ -419,7 +428,7 @@ function guardarPedidoCol(data) {
   const h = getHojaCol(HOJAS_COL.PEDIDOS);
   const v = h.getDataRange().getValues();
   const rn = normalizarRutCol(data.rut);
-  const ahora = new Date().toISOString();
+  const ahora = timestampLocalCol();
   for (let i = 1; i < v.length; i++) {
     if (mismaFechaCol(v[i][1], data.semana) &&
         normalizarRutCol(v[i][2]) === rn &&
