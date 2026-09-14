@@ -132,8 +132,18 @@ tr:hover td{background:var(--bg2)}
 @media(max-width:720px){.grid2{grid-template-columns:1fr}}
 @media print{
   .no-print{display:none!important}
-  body{background:#fff;color:#000}
-  .card{box-shadow:none;border:1px solid #ccc}
+  body{background:#fff;color:#000;font-size:12px}
+  .wrap{max-width:100%;padding:0}
+  .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid;padding:12px;margin-bottom:10px}
+  .card h2{color:#000}
+  .stat-row{break-inside:avoid}
+  table{font-size:11px}
+  th,td{padding:4px 6px;border-bottom:1px solid #ddd}
+  tr{break-inside:avoid}
+  .pill{border:1px solid #999;background:#fff!important;color:#000!important}
+  .pill.especial{border-color:#000}
+  .grid2{display:block}
+  .grid2 > .card{margin-bottom:14px}
 }
 </style>
 </head>
@@ -153,7 +163,8 @@ const state = {
   data: { trabajadores:[], menus:[], pedidos:[], config:{} },
   semanaRef: mondayOf(new Date()),
   adminTab: 'trabajadores',
-  msg: null
+  msg: null,
+  editandoRut: null  // RUT en edición en Reportes (null = nadie)
 };
 
 // ---------- fechas ----------
@@ -450,7 +461,7 @@ function renderAdmin(){
   const defs = [['trabajadores','Trabajadores'],['menu','Menú semanal'],['reportes','Reportes']];
   defs.forEach(([key,label])=>{
     const t = el('button',{class:'tab'+(state.adminTab===key?' active':'')}, label);
-    t.onclick = ()=>{ state.adminTab=key; render(); };
+    t.onclick = ()=>{ state.adminTab=key; state.editandoRut=null; render(); };
     tabs.appendChild(t);
   });
   wrap.appendChild(tabs);
@@ -763,8 +774,8 @@ function renderAdminReportes(){
   const prev = el('button',{class:'btn sm'},'‹');
   const lbl = el('div',{class:'lbl'}, fmtSemana(state.semanaRef));
   const next = el('button',{class:'btn sm'},'›');
-  prev.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,-7); render(); };
-  next.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,7); render(); };
+  prev.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,-7); state.editandoRut=null; render(); };
+  next.onclick=()=>{ state.semanaRef=addDays(state.semanaRef,7); state.editandoRut=null; render(); };
   nav.append(prev,lbl,next);
   box.appendChild(nav);
 
@@ -840,20 +851,47 @@ function renderAdminReportes(){
   const menusPorDia = {};
   diasConMenu.forEach(d=>{ menusPorDia[d] = menusSemana.filter(m=>m.dia===d).sort((a,b)=>String(a.opcion).localeCompare(String(b.opcion))); });
 
+  // Desglose por plato: mismo dato que la hoja "Desglose por plato" del
+  // Excel, pero visible en pantalla y en el PDF.
+  const desgloseCard = el('div',{class:'card'});
+  desgloseCard.appendChild(el('h2',{},'Desglose por plato'));
+  const dwrap = el('div',{class:'tbl-wrap'});
+  const dtbl = el('table',{});
+  const dhead = el('tr',{}); ['Día','Opción','Plato','Cantidad'].forEach(h=>dhead.appendChild(el('th',{},h)));
+  dtbl.appendChild(dhead);
+  diasConMenu.forEach(d=>{
+    (menusPorDia[d]||[]).forEach(m=>{
+      const n = pedidosSemana.filter(p=>p.dia===d && p.opcion===m.opcion).length;
+      const tr = el('tr',{});
+      tr.appendChild(el('td',{}, d + (diasEspeciales.has(d)?' 🌟':'')));
+      tr.appendChild(el('td',{}, el('span',{class:'pill blue'},m.opcion)));
+      tr.appendChild(el('td',{}, m.descripcion||''));
+      tr.appendChild(el('td',{}, el('strong',{},String(n))));
+      dtbl.appendChild(tr);
+    });
+  });
+  dwrap.appendChild(dtbl);
+  desgloseCard.appendChild(dwrap);
+  box.appendChild(desgloseCard);
+
   const gridBox = el('div',{class:'grid2'});
-  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, semana));
-  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, semana));
+  gridBox.appendChild(personListCard(`Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia));
+  gridBox.appendChild(personListCard(`Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia));
   box.appendChild(gridBox);
+
+  const editando = elegibles.find(t=>normRut(t.rut)===state.editandoRut);
+  if(editando) box.appendChild(renderEditorPedido(editando, pedidosSemana, diasConMenu, menusPorDia, semana));
 
   return box;
 }
 function statBox(n,label,cls){
   return el('div',{class:'stat '+(cls||'')}, el('div',{class:'n'},String(n)), el('div',{class:'l'},label));
 }
-// Lista de trabajadores con selects editables por día: la administración
-// puede fijar o cambiar la opción de cualquier persona en cualquier
-// momento, incluso si el plazo normal de inscripción ya cerró.
-function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusPorDia, semana){
+// Lista de trabajadores de solo lectura (texto plano, imprime bien). Cada
+// fila tiene un botón "✏️" para abrir el panel de edición de esa persona
+// (ver renderEditorPedido) en vez de mostrar un <select> por día y por
+// persona, que con muchos trabajadores se vuelve pesado y feo de imprimir.
+function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusPorDia){
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',{},title));
   if(!list.length){ card.appendChild(el('div',{class:'empty'},'Sin registros.')); return card; }
@@ -861,6 +899,7 @@ function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusP
   const tbl = el('table',{});
   const head = el('tr',{}); ['Nombre','RUT'].forEach(h=>head.appendChild(el('th',{},h)));
   dias.forEach(d=>head.appendChild(el('th',{}, d.slice(0,3) + (diasEspeciales&&diasEspeciales.has(d)?' 🌟':''))));
+  head.appendChild(el('th',{class:'no-print'},''));
   tbl.appendChild(head);
   list.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
     const tr = el('tr',{});
@@ -869,40 +908,69 @@ function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusP
     dias.forEach(d=>{
       const opciones = menusPorDia[d]||[];
       const actual = pedidosSemana.find(x=>normRut(x.rut)===normRut(t.rut) && x.dia===d);
-      const td = el('td',{});
-      const sel = el('select',{style:'min-width:110px;padding:6px 7px;font-size:12.5px'});
-      sel.appendChild(el('option',{value:''},'— Sin elegir'));
-      opciones.forEach(o=>{
-        const opt = el('option',{value:o.opcion}, `${o.opcion}: ${o.descripcion||''}`);
-        if(actual && String(actual.opcion)===String(o.opcion)) opt.selected = true;
-        sel.appendChild(opt);
-      });
-      if(!actual) sel.value = '';
-      sel.onchange = async ()=>{
-        sel.disabled = true;
-        const opcion = sel.value;
-        const res = opcion
-          ? await callApi({action:'guardarPedido', data:{semana, rut:t.rut, nombre:t.nombre, dia:d, opcion, asAdmin:true}})
-          : await callApi({action:'eliminarPedido', semana, rut:t.rut, dia:d, asAdmin:true});
-        sel.disabled = false;
-        if(res.ok){
-          const idx = state.data.pedidos.findIndex(p=>p.semana===semana && p.dia===d && normRut(p.rut)===normRut(t.rut));
-          if(opcion){
-            const nuevo = {semana, rut:t.rut, nombre:t.nombre, dia:d, opcion, timestamp:new Date().toISOString()};
-            if(idx>=0) state.data.pedidos[idx]=nuevo; else state.data.pedidos.push(nuevo);
-          } else if(idx>=0){
-            state.data.pedidos.splice(idx,1);
-          }
-          render();
-        } else alert(res.error||'Error');
-      };
-      td.appendChild(sel);
-      tr.appendChild(td);
+      let texto = '—';
+      if(actual){
+        const m = opciones.find(o=>String(o.opcion)===String(actual.opcion));
+        texto = m ? `${actual.opcion}: ${m.descripcion||''}` : actual.opcion;
+      }
+      tr.appendChild(el('td',{}, texto));
     });
+    const tdEdit = el('td',{class:'no-print'});
+    const btnEdit = el('button',{class:'btn ghost sm',title:'Editar pedido de esta persona'},'✏️');
+    btnEdit.onclick = ()=>{ state.editandoRut = normRut(t.rut); render(); };
+    tdEdit.appendChild(btnEdit);
+    tr.appendChild(tdEdit);
     tbl.appendChild(tr);
   });
   twrap.appendChild(tbl);
   card.appendChild(twrap);
+  return card;
+}
+// Panel aparte (no se imprime) para que administración fije o cambie el
+// pedido de UNA persona en cualquier momento, incluso si el plazo normal
+// de inscripción ya cerró.
+function renderEditorPedido(persona, pedidosSemana, dias, menusPorDia, semana){
+  const card = el('div',{class:'card no-print',style:'border-color:var(--blue);border-width:2px'});
+  const head = el('div',{class:'row',style:'justify-content:space-between'});
+  head.appendChild(el('h2',{}, `Editar pedido: ${persona.nombre} (${persona.rut})`));
+  const btnCerrar = el('button',{class:'btn sm'},'✕ Cerrar');
+  btnCerrar.onclick = ()=>{ state.editandoRut=null; render(); };
+  head.appendChild(btnCerrar);
+  card.appendChild(head);
+  dias.forEach(d=>{
+    const opciones = menusPorDia[d]||[];
+    const actual = pedidosSemana.find(x=>normRut(x.rut)===normRut(persona.rut) && x.dia===d);
+    const row = el('div',{class:'field'});
+    row.appendChild(el('label',{}, d));
+    const sel = el('select',{});
+    sel.appendChild(el('option',{value:''},'— Sin elegir'));
+    opciones.forEach(o=>{
+      const opt = el('option',{value:o.opcion}, `${o.opcion}: ${o.descripcion||''}`);
+      if(actual && String(actual.opcion)===String(o.opcion)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if(!actual) sel.value = '';
+    sel.onchange = async ()=>{
+      sel.disabled = true;
+      const opcion = sel.value;
+      const res = opcion
+        ? await callApi({action:'guardarPedido', data:{semana, rut:persona.rut, nombre:persona.nombre, dia:d, opcion, asAdmin:true}})
+        : await callApi({action:'eliminarPedido', semana, rut:persona.rut, dia:d, asAdmin:true});
+      sel.disabled = false;
+      if(res.ok){
+        const idx = state.data.pedidos.findIndex(p=>p.semana===semana && p.dia===d && normRut(p.rut)===normRut(persona.rut));
+        if(opcion){
+          const nuevo = {semana, rut:persona.rut, nombre:persona.nombre, dia:d, opcion, timestamp:new Date().toISOString()};
+          if(idx>=0) state.data.pedidos[idx]=nuevo; else state.data.pedidos.push(nuevo);
+        } else if(idx>=0){
+          state.data.pedidos.splice(idx,1);
+        }
+        render();
+      } else alert(res.error||'Error');
+    };
+    row.appendChild(sel);
+    card.appendChild(row);
+  });
   return card;
 }
 // Exporta un solo .xlsx con 4 hojas: resumen a gran escala (por opción),
