@@ -124,7 +124,7 @@ tr:hover td{background:var(--bg2)}
 .week-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px}
 .week-nav .lbl{font-weight:800;font-size:14.5px;flex:1;text-align:center}
 .day-card{border:1px solid var(--bd);border-radius:var(--r);padding:12px;margin-bottom:10px}
-.day-card h3{font-size:13.5px;font-weight:800;margin-bottom:8px;text-transform:capitalize;display:flex;align-items:center;gap:6px}
+.day-card h3{font-size:13.5px;font-weight:800;margin-bottom:8px;text-transform:capitalize;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .day-card.especial{border-color:var(--amber);border-width:2px;background:var(--am2)}
 .card.especial{border-color:var(--amber);border-width:2px}
 .pill.especial{background:var(--amber);color:#fff}
@@ -413,7 +413,10 @@ function renderTrabajadorBody(wrap){
     const especial = esDiaEspecial(opciones);
     const card = el('div',{class:'day-card'+(especial?' especial':'')});
     const h3 = el('h3',{}, `${dia} · ${fechaDia(state.semanaRef,dia).split('-').reverse().join('-')}`);
-    if(especial) h3.appendChild(el('span',{class:'pill especial'},'🌟 Almuerzo mejorado'));
+    if(especial){
+      const descEsp = descripcionEspecialDia(opciones);
+      h3.appendChild(el('span',{class:'pill especial'}, descEsp ? `🌟 Mejorado: ${descEsp}` : '🌟 Almuerzo mejorado'));
+    }
     card.appendChild(h3);
     const actual = misPedidos.find(p=>p.dia===dia);
     opciones.forEach(o=>{
@@ -472,6 +475,10 @@ function renderTrabajadorBody(wrap){
 }
 function normRut(r){ return String(r||'').toLowerCase().replace(/\.|-|\s/g,'').trim(); }
 function esDiaEspecial(opciones){ return opciones.some(o=>String(o.especial||'').toLowerCase()==='si'); }
+function descripcionEspecialDia(opciones){
+  const o = opciones.find(o=>String(o.especial||'').toLowerCase()==='si' && o.descripcionespecial);
+  return o ? String(o.descripcionespecial) : '';
+}
 function agregarPlatoLocal(nombre){
   nombre = String(nombre||'').trim();
   if(!nombre) return;
@@ -763,13 +770,43 @@ function renderAdminMenu(){
         const res = await callApi({action:'marcarDiaEspecial', semana, dia, especial:chkEsp.checked});
         chkEsp.disabled = false;
         if(res.ok){
-          opciones.forEach(o=>o.especial = chkEsp.checked ? 'Si':'No');
+          opciones.forEach(o=>{
+            o.especial = chkEsp.checked ? 'Si':'No';
+            o.descripcionespecial = chkEsp.checked ? (o.descripcionespecial||'') : '';
+          });
           render();
         } else { chkEsp.checked = !chkEsp.checked; alert(res.error||'Error'); }
       };
       head.appendChild(lblEsp);
     }
     card.appendChild(head);
+    if(especial){
+      const rEsp = el('div',{class:'row',style:'align-items:flex-start'});
+      const codeFieldEsp = el('div',{class:'field',style:'max-width:70px'});
+      codeFieldEsp.appendChild(el('label',{},'Opción'));
+      const inpCodeEsp = el('input',{type:'text',value:'🌟',style:'text-align:center;font-weight:800;background:var(--am2);border-color:var(--amber);color:var(--amber)'});
+      inpCodeEsp.disabled = true;
+      codeFieldEsp.appendChild(inpCodeEsp);
+      const descFieldEsp = el('div',{class:'field'});
+      descFieldEsp.appendChild(el('label',{},'Qué incluye el almuerzo mejorado'));
+      const inpDescEsp = el('input',{type:'text',value:descripcionEspecialDia(opciones),placeholder:'Ej: Torta con bebida',style:'background:var(--am2);border-color:var(--amber)'});
+      inpDescEsp.disabled = bloqueado;
+      descFieldEsp.appendChild(inpDescEsp);
+      const btnSaveEsp = el('button',{class:'btn sm',style:'margin-top:18px;background:var(--amber);border-color:var(--amber);color:#fff'},'Guardar');
+      btnSaveEsp.disabled = bloqueado;
+      btnSaveEsp.onclick = async ()=>{
+        btnSaveEsp.disabled = true;
+        const descripcionEspecial = inpDescEsp.value.trim();
+        const res = await callApi({action:'marcarDiaEspecial', semana, dia, especial:true, descripcionEspecial});
+        btnSaveEsp.disabled = false;
+        if(res.ok){
+          opciones.forEach(o=>o.descripcionespecial = descripcionEspecial);
+          btnSaveEsp.textContent='✓'; setTimeout(()=>btnSaveEsp.textContent='Guardar',1000);
+        } else alert(res.error||'Error');
+      };
+      rEsp.append(codeFieldEsp, descFieldEsp, btnSaveEsp);
+      card.appendChild(rEsp);
+    }
     opciones.forEach(o=>{
       const r = el('div',{class:'row',style:'align-items:flex-start'});
       const codeField = el('div',{class:'field',style:'max-width:70px'});

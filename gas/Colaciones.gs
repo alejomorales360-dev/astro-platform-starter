@@ -8,12 +8,15 @@
 //     - Activo: "Si" o "No"
 //     - FechaInicio / FechaFin: solo se usan para Tipo=Spot (rango de vigencia,
 //       formato AAAA-MM-DD). Si estan vacias, se considera vigente siempre.
-//   Menus: Semana | Dia | Opcion | Descripcion | Activo | Especial
+//   Menus: Semana | Dia | Opcion | Descripcion | Activo | Especial | DescripcionEspecial
 //     - Semana: fecha del lunes de esa semana, formato AAAA-MM-DD
 //     - Dia: Lunes, Martes, Miercoles, Jueves, Viernes
 //     - Opcion: A, B, C...
 //     - Especial: "Si" o "No" - marca un dia como almuerzo mejorado (para
 //       destacarlo y llevar registro de quienes se anotaron ese dia)
+//     - DescripcionEspecial: texto libre con lo que incluye el almuerzo
+//       mejorado ese dia (ej. "Torta con bebida"). Se repite en todas las
+//       filas/opciones de ese dia, igual que Especial.
 //   Pedidos: ID | Semana | RUT | Nombre | Dia | Opcion | Timestamp
 //     - Un trabajador solo puede tener UNA fila por (Semana, RUT, Dia): al
 //       guardar un pedido para un dia ya elegido, se reemplaza la opcion en
@@ -88,7 +91,7 @@ function procesarAccionCol(body) {
     case 'eliminarMenu':
       return eliminarMenuCol(body.semana, body.dia, body.opcion);
     case 'marcarDiaEspecial':
-      return marcarDiaEspecialCol(body.semana, body.dia, body.especial);
+      return marcarDiaEspecialCol(body.semana, body.dia, body.especial, body.descripcionEspecial);
     case 'copiarMenuSemana':
       return copiarMenuSemanaCol(body.semanaOrigen, body.semanaDestino);
     case 'guardarPedido':
@@ -336,12 +339,15 @@ function guardarMenuCol(data) {
       return { ok: true, actualizado: true };
     }
   }
-  // Una opcion nueva hereda el estado "especial" que ya tenga ese dia
-  // (si otras opciones del mismo dia estan marcadas como almuerzo mejorado).
+  // Una opcion nueva hereda el estado "especial" (y su descripcion) que ya
+  // tenga ese dia, si otras opciones del mismo dia estan marcadas como
+  // almuerzo mejorado.
   let especialDelDia = 'No';
+  let descripcionEspecialDelDia = '';
   for (let i = 1; i < v.length; i++) {
     if (mismaFechaCol(v[i][0], data.semana) && String(v[i][1]).trim() === String(data.dia).trim() && String(v[i][5]).trim() === 'Si') {
       especialDelDia = 'Si';
+      descripcionEspecialDelDia = String(v[i][6] || '');
       break;
     }
   }
@@ -349,19 +355,21 @@ function guardarMenuCol(data) {
     data.semana, data.dia, data.opcion,
     data.descripcion || '',
     data.activo === false ? 'No' : 'Si',
-    especialDelDia
+    especialDelDia,
+    descripcionEspecialDelDia
   ]);
   return { ok: true, creado: true };
 }
-function marcarDiaEspecialCol(semana, dia, especial) {
+function marcarDiaEspecialCol(semana, dia, especial, descripcionEspecial) {
   if (!semana || !dia) return { ok: false, error: 'Faltan datos del dia' };
   const h = getHojaCol(HOJAS_COL.MENUS);
   const v = h.getDataRange().getValues();
   const valor = especial ? 'Si' : 'No';
+  const descripcion = especial ? String(descripcionEspecial || '') : '';
   let actualizadas = 0;
   for (let i = 1; i < v.length; i++) {
     if (mismaFechaCol(v[i][0], semana) && String(v[i][1]).trim() === String(dia).trim()) {
-      h.getRange(i + 1, 6).setValue(valor);
+      h.getRange(i + 1, 6, 1, 2).setValues([[valor, descripcion]]);
       actualizadas++;
     }
   }
@@ -476,7 +484,7 @@ function crearHojasIniciales() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const specs = {
     Trabajadores: ['RUT', 'Nombre', 'Tipo', 'Activo', 'FechaInicio', 'FechaFin', 'Notas'],
-    Menus: ['Semana', 'Dia', 'Opcion', 'Descripcion', 'Activo', 'Especial'],
+    Menus: ['Semana', 'Dia', 'Opcion', 'Descripcion', 'Activo', 'Especial', 'DescripcionEspecial'],
     Pedidos: ['ID', 'Semana', 'RUT', 'Nombre', 'Dia', 'Opcion', 'Timestamp'],
     Config: ['Clave', 'Valor'],
     Platos: ['Nombre']
@@ -505,6 +513,18 @@ function agregarColumnaEspecial() {
   }
   h.getRange(1, 6).setValue('Especial');
   Logger.log('Columna "Especial" agregada en Menus!F1.');
+}
+// Ejecutar UNA VEZ si tu hoja "Menus" ya existia antes de que se agregara
+// la descripcion del almuerzo mejorado (ej. "Torta con bebida").
+function agregarColumnaDescripcionEspecial() {
+  const h = getHojaCol(HOJAS_COL.MENUS);
+  const encabezado = h.getRange(1, 1, 1, Math.max(7, h.getLastColumn())).getValues()[0];
+  if (String(encabezado[6] || '').trim().toLowerCase() === 'descripcionespecial') {
+    Logger.log('La columna DescripcionEspecial ya existe.');
+    return;
+  }
+  h.getRange(1, 7).setValue('DescripcionEspecial');
+  Logger.log('Columna "DescripcionEspecial" agregada en Menus!G1.');
 }
 // Ejecutar UNA VEZ si tu planilla ya existia antes de que se agregara el
 // cierre de inscripciones configurable. Agrega las claves con sus valores
