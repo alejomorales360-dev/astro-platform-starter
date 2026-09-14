@@ -17,6 +17,9 @@ junto con este sitio en Netlify (queda disponible en `/colaciones/`).
     que solo reciben colación durante un rango de fechas puntual) indicando
     fecha de inicio y fin de vigencia.
   - Definir el menú de cada día de la semana (varias opciones, ej. A/B/C).
+    Al escribir la descripción de un plato, la app sugiere platos ya
+    usados antes (se guardan solos en un catálogo) para no reescribirlos
+    cada semana.
   - Marcar un día como **🌟 Almuerzo mejorado** para destacarlo y llevar
     registro de quiénes se anotaron ese día en particular.
   - Copiar el menú de la semana anterior como punto de partida.
@@ -97,6 +100,13 @@ Ejecuta una vez desde el editor de Apps Script la función
 `cierre_dias_antes` (5) y `cierre_hora` (14:30) si no existen, sin tocar tus
 datos. Después puedes cambiarlas directamente en `Config` o desde el panel
 de administración (pestaña Menú semanal → "Cierre de inscripciones").
+
+## Si tu planilla ya existía antes del catálogo de platos
+
+Ejecuta una vez desde el editor de Apps Script la función
+**`agregarHojaPlatos`** — crea la hoja `Platos` si falta y la precarga con
+todas las descripciones que ya tenías escritas en `Menus`, para no perder
+nada de lo ya cargado.
 
 ## Diagnóstico rápido
 
