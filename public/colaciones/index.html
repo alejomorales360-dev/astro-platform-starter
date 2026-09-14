@@ -98,6 +98,11 @@ tr:hover td{background:var(--bg2)}
 .pill.no{background:var(--rd2);color:var(--red)}
 .pill.spot{background:var(--am2);color:var(--amber)}
 .pill.blue{background:var(--bl2);color:var(--bl3)}
+.pill.dia{background:var(--blue);color:#fff;font-size:12.5px;padding:4px 11px}
+.tbl-por-dia td{vertical-align:middle}
+.tbl-por-dia tr.banda-a td{background:var(--bg)}
+.tbl-por-dia tr.banda-b td{background:var(--bg2)}
+.tbl-por-dia tr.dia-nuevo td{border-top:2px solid var(--bd2)}
 .msg{padding:10px 13px;border-radius:var(--r);font-size:13.5px;margin-bottom:12px}
 .msg.err{background:var(--rd2);color:var(--red)}
 .msg.ok{background:var(--gr2);color:var(--gr3)}
@@ -855,18 +860,26 @@ function renderAdminReportes(){
   diasConMenu.forEach(d=>{ menusPorDia[d] = menusSemana.filter(m=>m.dia===d).sort((a,b)=>String(a.opcion).localeCompare(String(b.opcion))); });
 
   // Desglose por plato: mismo dato que la hoja "Desglose por plato" del
-  // Excel, pero visible en pantalla y en el PDF.
+  // Excel, pero visible en pantalla y en el PDF. Se agrupa por día (celda
+  // "Día" combinada + franja de color) para que cada día se distinga del
+  // siguiente en vez de verse todo como una sola tabla continua.
   const desgloseCard = el('div',{class:'card'});
   desgloseCard.appendChild(el('h2',{},'Desglose por plato'));
   const dwrap = el('div',{class:'tbl-wrap'});
-  const dtbl = el('table',{});
+  const dtbl = el('table',{class:'tbl-por-dia'});
   const dhead = el('tr',{}); ['Día','Opción','Plato','Cantidad'].forEach(h=>dhead.appendChild(el('th',{},h)));
   dtbl.appendChild(dhead);
-  diasConMenu.forEach(d=>{
-    (menusPorDia[d]||[]).forEach(m=>{
+  diasConMenu.forEach((d,i)=>{
+    const opciones = menusPorDia[d]||[];
+    const banda = i%2===0 ? 'banda-a' : 'banda-b';
+    opciones.forEach((m,j)=>{
       const n = pedidosSemana.filter(p=>p.dia===d && p.opcion===m.opcion).length;
-      const tr = el('tr',{});
-      tr.appendChild(el('td',{}, d + (diasEspeciales.has(d)?' 🌟':'')));
+      const tr = el('tr',{class:banda + (j===0?' dia-nuevo':'')});
+      if(j===0){
+        const tdDia = el('td',{rowspan:String(opciones.length)});
+        tdDia.appendChild(el('span',{class:'pill dia'}, d + (diasEspeciales.has(d)?' 🌟':'')));
+        tr.appendChild(tdDia);
+      }
       tr.appendChild(el('td',{}, el('span',{class:'pill blue'},m.opcion)));
       tr.appendChild(el('td',{}, m.descripcion||''));
       tr.appendChild(el('td',{}, el('strong',{},String(n))));
@@ -877,8 +890,8 @@ function renderAdminReportes(){
   desgloseCard.appendChild(dwrap);
   box.appendChild(desgloseCard);
 
-  box.appendChild(personListCard(`✅ Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, 'ok'));
-  box.appendChild(personListCard(`⚠️ Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, menusPorDia, 'no'));
+  box.appendChild(personListCard(`✅ Anotados (${anotados.length})`, anotados, pedidosSemana, diasConMenu, diasEspeciales, 'ok'));
+  box.appendChild(personListCard(`⚠️ Sin anotarse (${noAnotados.length})`, noAnotados, pedidosSemana, diasConMenu, diasEspeciales, 'no'));
 
   const editando = elegibles.find(t=>normRut(t.rut)===state.editandoRut);
   if(editando) box.appendChild(renderEditorPedido(editando, pedidosSemana, diasConMenu, menusPorDia, semana));
@@ -892,7 +905,7 @@ function statBox(n,label,cls){
 // fila tiene un botón "✏️" para abrir el panel de edición de esa persona
 // (ver renderEditorPedido) en vez de mostrar un <select> por día y por
 // persona, que con muchos trabajadores se vuelve pesado y feo de imprimir.
-function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusPorDia, tono){
+function personListCard(title, list, pedidosSemana, dias, diasEspeciales, tono){
   const card = el('div',{class:'card'+(tono?' tone-'+tono:'')});
   card.appendChild(el('h2',{},title));
   if(!list.length){ card.appendChild(el('div',{class:'empty'},'Sin registros.')); return card; }
@@ -907,14 +920,8 @@ function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusP
     tr.appendChild(el('td',{},t.nombre + (t.tipo==='Spot'?' 🔸':'')));
     tr.appendChild(el('td',{},t.rut));
     dias.forEach(d=>{
-      const opciones = menusPorDia[d]||[];
       const actual = pedidosSemana.find(x=>normRut(x.rut)===normRut(t.rut) && x.dia===d);
-      let texto = '—';
-      if(actual){
-        const m = opciones.find(o=>String(o.opcion)===String(actual.opcion));
-        texto = m ? `${actual.opcion}: ${m.descripcion||''}` : actual.opcion;
-      }
-      tr.appendChild(el('td',{}, texto));
+      tr.appendChild(el('td',{}, actual ? el('span',{class:'pill blue'},actual.opcion) : '—'));
     });
     const tdEdit = el('td',{class:'no-print'});
     const btnEdit = el('button',{class:'btn ghost sm',title:'Editar pedido de esta persona'},'✏️');
