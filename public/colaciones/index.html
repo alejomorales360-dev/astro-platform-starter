@@ -177,13 +177,13 @@ function fechaDia(semanaMonday, diaNombre){
 }
 // Instante en que cierran las inscripciones de la semana cuyo lunes es
 // semanaMonday: "cierre_dias_antes" días antes, a las "cierre_hora".
-// Por defecto: miércoles de la semana previa a las 14:30. Debe coincidir
+// Por defecto: miércoles de la semana previa a las 14:00. Debe coincidir
 // con calcularCierreCol() en gas/Colaciones.gs.
 function calcularCierre(semanaMonday, config){
   config = config||{};
   const diasAntes = Number(config.cierre_dias_antes);
   const dias = isNaN(diasAntes) ? 5 : diasAntes;
-  const hora = String(config.cierre_hora || '14:30').trim();
+  const hora = String(config.cierre_hora || '14:00').trim();
   const [hh,mm] = hora.split(':').map(n=>Number(n)||0);
   const cierre = addDays(semanaMonday, -dias);
   cierre.setHours(hh, mm, 0, 0);
@@ -191,6 +191,15 @@ function calcularCierre(semanaMonday, config){
 }
 function inscripcionesCerradas(semanaMonday, config){
   return new Date() > calcularCierre(semanaMonday, config);
+}
+// Rescata un HH:MM valido desde cualquier valor guardado en cierre_hora,
+// incluso si quedo corrompido como una fecha/hora completa (ISO); si no
+// encuentra nada usable, devuelve el valor por defecto.
+function horaValidaOr(valor, porDefecto){
+  const m = String(valor||'').match(/(\d{1,2}):(\d{2})/);
+  if(!m) return porDefecto;
+  const hh = String(Math.min(23,Number(m[1]))).padStart(2,'0');
+  return `${hh}:${m[2]}`;
 }
 function fmtCierre(d){
   const opt = {weekday:'long', day:'numeric', month:'long'};
@@ -473,7 +482,7 @@ function renderCierreConfigCard(){
   fDias.appendChild(inpDias);
   const fHora = el('div',{class:'field',style:'max-width:140px'});
   fHora.appendChild(el('label',{},'Hora de cierre'));
-  const inpHora = el('input',{type:'text',placeholder:'14:30',value:String(state.data.config.cierre_hora || '14:30')});
+  const inpHora = el('input',{type:'time',value:horaValidaOr(state.data.config.cierre_hora,'14:00')});
   fHora.appendChild(inpHora);
   const btnGuardar = el('button',{class:'btn primary',style:'margin-bottom:12px'},'Guardar');
   const msgBox = el('div',{style:'flex-basis:100%'});
@@ -481,7 +490,7 @@ function renderCierreConfigCard(){
     const dias = parseInt(inpDias.value,10);
     const hora = inpHora.value.trim();
     if(isNaN(dias) || dias<0 || !/^\d{1,2}:\d{2}$/.test(hora)){
-      msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'},'Revisa los días (número) y la hora (HH:MM).'));
+      msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'},'Revisa los días (número) y la hora.'));
       return;
     }
     btnGuardar.disabled = true;
