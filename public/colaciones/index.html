@@ -99,6 +99,9 @@ tr:hover td{background:var(--bg2)}
 .pill.spot{background:var(--am2);color:var(--amber)}
 .pill.blue{background:var(--bl2);color:var(--bl3)}
 .pill.dia{background:var(--blue);color:#fff;font-size:12.5px;padding:4px 11px}
+.tbl-mi-pedido th:nth-child(1),.tbl-mi-pedido td:nth-child(1){width:1%;white-space:nowrap}
+.tbl-mi-pedido th:nth-child(2),.tbl-mi-pedido td:nth-child(2){width:1%;white-space:nowrap}
+.tbl-mi-pedido th:nth-child(3),.tbl-mi-pedido td:nth-child(3){width:100%}
 .tbl-por-dia td{vertical-align:middle}
 .tbl-por-dia tr.banda-a td{background:var(--bg)}
 .tbl-por-dia tr.banda-b td{background:var(--bg2)}
@@ -121,8 +124,11 @@ tr:hover td{background:var(--bg2)}
 .seg{display:flex;background:var(--bg2);border-radius:10px;padding:3px;margin-bottom:18px}
 .seg button{flex:1;padding:11px 8px;border-radius:8px;border:none;background:transparent;font-weight:700;font-size:13.5px;color:var(--t2);min-height:44px}
 .seg button.active{background:var(--bg);box-shadow:var(--sh)}
-.week-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-.week-nav .lbl{font-weight:800;font-size:14.5px;flex:1;text-align:center}
+.week-nav{display:flex;align-items:center;gap:10px;margin-bottom:14px;background:var(--bg);border:1px solid var(--bd);border-radius:var(--rl);padding:8px 10px;box-shadow:var(--sh)}
+.week-nav .lbl{font-weight:800;font-size:15px;flex:1;text-align:center}
+.week-nav .btn{background:var(--blue);border-color:var(--blue);color:#fff;font-size:18px;font-weight:800;min-width:46px;padding:8px}
+.week-nav .btn:hover{background:var(--bl3)}
+.week-nav .btn:active{transform:scale(.94)}
 .day-card{border:1px solid var(--bd);border-radius:var(--r);padding:12px;margin-bottom:10px}
 .day-card h3{font-size:13.5px;font-weight:800;margin-bottom:8px;text-transform:capitalize;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .day-card.especial{border-color:var(--amber);border-width:2px;background:var(--am2)}
@@ -458,14 +464,19 @@ function renderTrabajadorBody(wrap){
     resumen.appendChild(el('div',{class:'empty'},'Todavía no has elegido ninguna opción.'));
   } else {
     const tblWrap = el('div',{class:'tbl-wrap'});
-    const tbl = el('table',{});
-    const thead = el('tr',{}); ['Día','Opción'].forEach(h=>thead.appendChild(el('th',{},h)));
+    const tbl = el('table',{class:'tbl-mi-pedido'});
+    const thead = el('tr',{});
+    thead.appendChild(el('th',{},'Día'));
+    thead.appendChild(el('th',{},'Opción'));
+    thead.appendChild(el('th',{},'Descripción'));
     tbl.appendChild(thead);
     DIAS.filter(d=>menusSemana.some(m=>m.dia===d)).forEach(d=>{
       const p = misPedidos.find(x=>x.dia===d);
+      const m = p ? menusSemana.find(x=>x.dia===d && String(x.opcion)===String(p.opcion)) : null;
       const tr = el('tr',{});
       tr.appendChild(el('td',{},d));
       tr.appendChild(el('td',{}, p?el('span',{class:'pill blue'},p.opcion):el('span',{class:'pill no'},'Sin elegir')));
+      tr.appendChild(el('td',{}, m ? (m.descripcion||'') : ''));
       tbl.appendChild(tr);
     });
     tblWrap.appendChild(tbl);
