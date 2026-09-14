@@ -225,13 +225,25 @@ function inscripcionesCerradasCol(semana, cfg) {
 }
 
 // --- ADMIN LOGIN ---
+// Devuelve, en la misma llamada, todos los datos que necesita el panel de
+// administracion (evita un segundo viaje al servidor solo para cargarlos,
+// que es lo que hacia mas lento el ingreso como admin).
 function verificarLoginAdminCol(password) {
   const cfg = obtenerConfigCol();
   const clave = String(cfg.admin_password || '').trim();
   if (!clave) return { ok: false, error: 'No hay clave de administrador configurada (revisa la hoja Config).' };
-  if (String(password || '').trim() === clave) return { ok: true };
-  Utilities.sleep(400);
-  return { ok: false, error: 'Clave incorrecta' };
+  if (String(password || '').trim() !== clave) {
+    Utilities.sleep(400);
+    return { ok: false, error: 'Clave incorrecta' };
+  }
+  return {
+    ok: true,
+    trabajadores: hojaAObjetosCol(HOJAS_COL.TRABAJADORES),
+    menus: hojaAObjetosCol(HOJAS_COL.MENUS),
+    pedidos: hojaAObjetosCol(HOJAS_COL.PEDIDOS),
+    platos: listarPlatosCol(),
+    config: cfg
+  };
 }
 
 // --- TRABAJADORES ---

@@ -219,20 +219,14 @@ function callApi(body){
     body: JSON.stringify(body)
   }).then(r=>r.json()).catch(()=> jsonp(body));
 }
-function fetchTodo(){
-  if(!GAS_URL || GAS_URL.indexOf('PEGA_AQUI') === 0){
-    return Promise.resolve({ok:false, error:'Falta configurar GAS_URL en index.html.'});
-  }
-  return fetch(GAS_URL).then(r=>r.json()).catch(()=> jsonp(null,true));
-}
-function jsonp(body, isGet){
+function jsonp(body){
   return new Promise((resolve)=>{
     const cbName = 'cb_'+Date.now()+'_'+Math.floor(Math.random()*1e6);
     window[cbName] = (data)=>{ resolve(data); cleanup(); };
     const script = document.createElement('script');
     const params = new URLSearchParams();
     params.set('callback', cbName);
-    if(!isGet) params.set('body', encodeURIComponent(JSON.stringify(body)));
+    params.set('body', encodeURIComponent(JSON.stringify(body)));
     script.src = GAS_URL + '?' + params.toString();
     script.onerror = ()=>{ resolve({ok:false,error:'No se pudo conectar al servidor.'}); cleanup(); };
     document.body.appendChild(script);
@@ -297,18 +291,15 @@ function renderLogin(){
 
   btnA.onclick = async ()=>{
     const pass = card.querySelector('#loginPass').value;
-    btnA.disabled = true; btnA.textContent='Verificando…';
+    btnA.disabled = true; btnA.textContent='Ingresando…';
     const res = await callApi({action:'loginAdmin', password:pass});
+    btnA.disabled=false; btnA.textContent='Ingresar como admin';
     if(!res.ok){
-      btnA.disabled=false; btnA.textContent='Ingresar como admin';
       msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'}, res.error||'Clave incorrecta'));
       return;
     }
-    const todo = await fetchTodo();
-    btnA.disabled=false; btnA.textContent='Ingresar como admin';
-    if(!todo.ok){ msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'}, todo.error||'No se pudieron cargar los datos')); return; }
     state.role='admin';
-    state.data = todo;
+    state.data = res;
     render();
   };
   formA.querySelector('input').addEventListener('keydown', e=>{ if(e.key==='Enter') btnA.click(); });
