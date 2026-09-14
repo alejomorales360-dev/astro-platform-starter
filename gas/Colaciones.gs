@@ -28,12 +28,18 @@
 //     Pasado ese plazo, los trabajadores ya no pueden elegir ni cambiar su
 //     opcion para esa semana: solo la administracion puede seguir editando
 //     pedidos de esa semana (guardarPedido con asAdmin:true).
+//   Platos: Nombre
+//     - Catalogo de platos ya usados alguna vez, para elegirlos rapido al
+//       armar el menu en vez de escribirlos de nuevo. Se llena solo: cada
+//       vez que se guarda una opcion de menu con una descripcion nueva, se
+//       agrega aqui si no existia (sin duplicados, sin distinguir mayus).
 
 const HOJAS_COL = {
   TRABAJADORES: 'Trabajadores',
   MENUS: 'Menus',
   PEDIDOS: 'Pedidos',
-  CONFIG: 'Config'
+  CONFIG: 'Config',
+  PLATOS: 'Platos'
 };
 
 function doGet(e) {
@@ -89,6 +95,8 @@ function procesarAccionCol(body) {
       return eliminarPedidoCol(body.semana, body.rut, body.dia, body.asAdmin);
     case 'guardarConfig':
       return actualizarConfigCol(body.clave, body.valor);
+    case 'eliminarPlato':
+      return eliminarPlatoCol(body.nombre);
     default:
       return { ok: false, error: 'Accion no reconocida: ' + body.action };
   }
@@ -152,6 +160,7 @@ function obtenerTodoCol() {
     trabajadores: hojaAObjetosCol(HOJAS_COL.TRABAJADORES),
     menus: hojaAObjetosCol(HOJAS_COL.MENUS),
     pedidos: hojaAObjetosCol(HOJAS_COL.PEDIDOS),
+    platos: listarPlatosCol(),
     config: obtenerConfigCol(),
     timestamp: new Date().toISOString()
   };
@@ -249,9 +258,43 @@ function eliminarTrabajadorCol(rut) {
   return { ok: false, error: 'RUT no encontrado: ' + rut };
 }
 
+// --- CATALOGO DE PLATOS ---
+// Guarda un plato en el catalogo si no existe todavia (sin distinguir
+// mayus/minus ni espacios extra), para poder elegirlo rapido despues.
+function guardarPlatoCol(nombre) {
+  const limpio = String(nombre || '').trim();
+  if (!limpio) return;
+  const h = getHojaCol(HOJAS_COL.PLATOS);
+  const v = h.getDataRange().getValues();
+  const clave = limpio.toLowerCase();
+  const yaExiste = v.slice(1).some(f => String(f[0]).trim().toLowerCase() === clave);
+  if (!yaExiste) h.appendRow([limpio]);
+}
+function listarPlatosCol() {
+  try {
+    const v = getHojaCol(HOJAS_COL.PLATOS).getDataRange().getValues();
+    return v.slice(1).map(f => String(f[0]).trim()).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    return [];
+  }
+}
+function eliminarPlatoCol(nombre) {
+  const h = getHojaCol(HOJAS_COL.PLATOS);
+  const v = h.getDataRange().getValues();
+  const clave = String(nombre || '').trim().toLowerCase();
+  for (let i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim().toLowerCase() === clave) {
+      h.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Plato no encontrado en el catalogo' };
+}
+
 // --- MENUS ---
 function guardarMenuCol(data) {
   if (!data || !data.semana || !data.dia || !data.opcion) return { ok: false, error: 'Faltan datos del menu' };
+  if (data.descripcion) guardarPlatoCol(data.descripcion);
   const h = getHojaCol(HOJAS_COL.MENUS);
   const v = h.getDataRange().getValues();
   for (let i = 1; i < v.length; i++) {
@@ -409,7 +452,8 @@ function crearHojasIniciales() {
     Trabajadores: ['RUT', 'Nombre', 'Tipo', 'Activo', 'FechaInicio', 'FechaFin', 'Notas'],
     Menus: ['Semana', 'Dia', 'Opcion', 'Descripcion', 'Activo', 'Especial'],
     Pedidos: ['ID', 'Semana', 'RUT', 'Nombre', 'Dia', 'Opcion', 'Timestamp'],
-    Config: ['Clave', 'Valor']
+    Config: ['Clave', 'Valor'],
+    Platos: ['Nombre']
   };
   Object.keys(specs).forEach(nombre => {
     let h = ss.getSheetByName(nombre);
@@ -446,4 +490,23 @@ function agregarConfigCierre() {
   if (!claves.includes('cierre_dias_antes')) h.appendRow(['cierre_dias_antes', 5]);
   if (!claves.includes('cierre_hora')) h.appendRow(['cierre_hora', '14:30']);
   Logger.log('Config de cierre lista (cierre_dias_antes, cierre_hora).');
+}
+// Ejecutar UNA VEZ si tu planilla ya existia antes del catalogo de platos.
+// Crea la hoja "Platos" si falta y la precarga con todas las descripciones
+// ya usadas en "Menus", para no perder lo que ya tenias escrito.
+function agregarHojaPlatos() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let h = ss.getSheetByName(HOJAS_COL.PLATOS);
+  if (!h) h = ss.insertSheet(HOJAS_COL.PLATOS);
+  if (h.getLastRow() === 0) h.appendRow(['Nombre']);
+  const menus = hojaAObjetosCol(HOJAS_COL.MENUS);
+  let agregados = 0;
+  menus.forEach(m => {
+    if (m.descripcion) {
+      const antes = listarPlatosCol().length;
+      guardarPlatoCol(m.descripcion);
+      if (listarPlatosCol().length > antes) agregados++;
+    }
+  });
+  Logger.log('Hoja Platos lista. Platos agregados desde Menus: ' + agregados);
 }
