@@ -526,12 +526,19 @@ function renderAccordionCard(titulo, stateKey, buildBody){
   }
   return card;
 }
+// Se sigue guardando internamente como "cierre_dias_antes" (relativo al
+// lunes de cada semana), pero se muestra y edita como una fecha concreta
+// —la del cierre de la semana que se está viendo— para que sea más claro
+// que "5 días antes del lunes". Al guardar, se recalcula esa cantidad de
+// días a partir de la fecha elegida, así la regla sigue aplicando igual a
+// todas las semanas (futuras y pasadas), no solo a la que se ve ahora.
 function buildCierreConfigBody(card){
+  const cierreActual = calcularCierre(state.semanaRef, state.data.config);
   const row = el('div',{class:'row',style:'align-items:flex-end'});
-  const fDias = el('div',{class:'field',style:'max-width:180px'});
-  fDias.appendChild(el('label',{},'Días antes del lunes'));
-  const inpDias = el('input',{type:'text',inputmode:'numeric',value:String(state.data.config.cierre_dias_antes ?? 5)});
-  fDias.appendChild(inpDias);
+  const fFecha = el('div',{class:'field',style:'max-width:170px'});
+  fFecha.appendChild(el('label',{},'Fecha de cierre'));
+  const inpFecha = el('input',{type:'date',value:iso(cierreActual)});
+  fFecha.appendChild(inpFecha);
   const fHora = el('div',{class:'field',style:'max-width:140px'});
   fHora.appendChild(el('label',{},'Hora de cierre'));
   const inpHora = el('input',{type:'time',value:horaValidaOr(state.data.config.cierre_hora,'14:00')});
@@ -539,12 +546,13 @@ function buildCierreConfigBody(card){
   const btnGuardar = el('button',{class:'btn primary',style:'margin-bottom:12px'},'Guardar');
   const msgBox = el('div',{style:'flex-basis:100%'});
   btnGuardar.onclick = async ()=>{
-    const dias = parseInt(inpDias.value,10);
     const hora = inpHora.value.trim();
-    if(isNaN(dias) || dias<0 || !/^\d{1,2}:\d{2}$/.test(hora)){
-      msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'},'Revisa los días (número) y la hora.'));
+    if(!inpFecha.value || !/^\d{1,2}:\d{2}$/.test(hora)){
+      msgBox.innerHTML=''; msgBox.appendChild(el('div',{class:'msg err'},'Revisa la fecha y la hora.'));
       return;
     }
+    const fechaElegida = new Date(inpFecha.value+'T00:00:00');
+    const dias = Math.round((mondayOf(state.semanaRef) - fechaElegida) / 86400000);
     btnGuardar.disabled = true;
     const r1 = await callApi({action:'guardarConfig', clave:'cierre_dias_antes', valor:dias});
     const r2 = await callApi({action:'guardarConfig', clave:'cierre_hora', valor:hora});
@@ -558,11 +566,11 @@ function buildCierreConfigBody(card){
       msgBox.appendChild(el('div',{class:'msg err'}, r1.error||r2.error||'No se pudo guardar.'));
     }
   };
-  row.append(fDias, fHora, btnGuardar, msgBox);
+  row.append(fFecha, fHora, btnGuardar, msgBox);
   card.appendChild(row);
   const dias = Number(state.data.config.cierre_dias_antes ?? 5);
   card.appendChild(el('div',{style:'font-size:12.5px;color:var(--t2)'},
-    `Con estos valores, cada semana se cierra ${dias} día${dias===1?'':'s'} antes de su lunes, a la hora indicada. Después de eso, los trabajadores ya no pueden elegir ni cambiar su opción; solo administración puede seguir editando pedidos de esa semana.`));
+    `La fecha de arriba es la del cierre para la semana que estás viendo (${fmtSemana(state.semanaRef)}). Esa misma cantidad de días antes del lunes (${dias} día${dias===1?'':'s'}) se aplica automáticamente a todas las demás semanas. Después del cierre, los trabajadores ya no pueden elegir ni cambiar su opción; solo administración puede seguir editando pedidos de esa semana.`));
 }
 function buildCatalogoPlatosBody(card){
   card.appendChild(el('div',{style:'font-size:12.5px;color:var(--t2);margin-bottom:10px'},
