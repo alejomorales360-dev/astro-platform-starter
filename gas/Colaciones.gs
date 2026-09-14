@@ -24,7 +24,9 @@
 //       cierran las inscripciones (por defecto 5 = miercoles de la semana
 //       previa). Editable desde el panel de administracion.
 //     - cierre_hora: hora de cierre ese dia, formato HH:MM (por defecto
-//       "14:30"). Editable desde el panel de administracion.
+//       "14:00"). Editable desde el panel de administracion. Se guarda
+//       forzando formato de texto en la celda para que Sheets no la
+//       reinterprete como una hora/fecha.
 //     Pasado ese plazo, los trabajadores ya no pueden elegir ni cambiar su
 //     opcion para esa semana: solo la administracion puede seguir editando
 //     pedidos de esa semana (guardarPedido con asAdmin:true).
@@ -169,7 +171,15 @@ function obtenerConfigCol() {
   try {
     const v = getHojaCol(HOJAS_COL.CONFIG).getDataRange().getValues();
     const c = {};
-    v.slice(1).forEach(f => { if (f[0]) c[String(f[0]).toLowerCase().trim()] = f[1]; });
+    v.slice(1).forEach(f => {
+      if (!f[0]) return;
+      let valor = f[1];
+      // Si la celda quedo guardada como fecha/hora (Sheets la autodetecto
+      // como tal alguna vez), se recupera solo la hora:minuto en vez de
+      // devolver el timestamp completo tal cual.
+      if (valor instanceof Date) valor = Utilities.formatDate(valor, Session.getScriptTimeZone(), 'HH:mm');
+      c[String(f[0]).toLowerCase().trim()] = valor;
+    });
     return c;
   } catch (err) {
     return {};
@@ -179,23 +189,27 @@ function actualizarConfigCol(clave, valor) {
   if (!clave) return { ok: false, error: 'Falta la clave de configuracion' };
   const h = getHojaCol(HOJAS_COL.CONFIG);
   const v = h.getDataRange().getValues();
+  // Forzar formato de texto en la celda para que Sheets no reinterprete
+  // valores como "14:00" como una hora/fecha (lo que corrompia cierre_hora).
   for (let i = 1; i < v.length; i++) {
     if (String(v[i][0]).toLowerCase().trim() === String(clave).toLowerCase().trim()) {
-      h.getRange(i + 1, 2).setValue(valor);
+      h.getRange(i + 1, 2).setNumberFormat('@').setValue(valor);
       return { ok: true };
     }
   }
-  h.appendRow([clave, valor]);
+  const fila = h.getLastRow() + 1;
+  h.getRange(fila, 1).setValue(clave);
+  h.getRange(fila, 2).setNumberFormat('@').setValue(valor);
   return { ok: true, creado: true };
 }
 // Calcula el instante (Date) en que se cierran las inscripciones de una
 // semana: "cierre_dias_antes" dias antes del lunes de esa semana, a la hora
-// "cierre_hora". Por defecto: miercoles de la semana previa a las 14:30.
+// "cierre_hora". Por defecto: miercoles de la semana previa a las 14:00.
 function calcularCierreCol(semana, cfg) {
   cfg = cfg || obtenerConfigCol();
   const diasAntes = Number(cfg.cierre_dias_antes);
   const dias = isNaN(diasAntes) ? 5 : diasAntes;
-  const hora = String(cfg.cierre_hora || '14:30').trim();
+  const hora = String(cfg.cierre_hora || '14:00').trim();
   const partes = hora.split(':');
   const hh = Number(partes[0]) || 0;
   const mm = Number(partes[1]) || 0;
@@ -465,7 +479,7 @@ function crearHojasIniciales() {
   const claves = v.slice(1).map(f => String(f[0]).toLowerCase().trim());
   if (!claves.includes('admin_password')) cfg.appendRow(['admin_password', 'cambiar123']);
   if (!claves.includes('cierre_dias_antes')) cfg.appendRow(['cierre_dias_antes', 5]);
-  if (!claves.includes('cierre_hora')) cfg.appendRow(['cierre_hora', '14:30']);
+  if (!claves.includes('cierre_hora')) actualizarConfigCol('cierre_hora', '14:00');
   Logger.log('Hojas listas. Recuerda cambiar la clave admin_password en la hoja Config.');
 }
 // Ejecutar UNA VEZ si tu hoja "Menus" ya existia antes de que se agregara la
@@ -482,14 +496,24 @@ function agregarColumnaEspecial() {
 }
 // Ejecutar UNA VEZ si tu planilla ya existia antes de que se agregara el
 // cierre de inscripciones configurable. Agrega las claves con sus valores
-// por defecto (5 dias antes del lunes, a las 14:30) si no existen.
+// por defecto (5 dias antes del lunes, a las 14:00) si no existen.
 function agregarConfigCierre() {
   const h = getHojaCol(HOJAS_COL.CONFIG);
   const v = h.getDataRange().getValues();
   const claves = v.slice(1).map(f => String(f[0]).toLowerCase().trim());
   if (!claves.includes('cierre_dias_antes')) h.appendRow(['cierre_dias_antes', 5]);
-  if (!claves.includes('cierre_hora')) h.appendRow(['cierre_hora', '14:30']);
+  if (!claves.includes('cierre_hora')) actualizarConfigCol('cierre_hora', '14:00');
   Logger.log('Config de cierre lista (cierre_dias_antes, cierre_hora).');
+}
+// Ejecutar UNA VEZ si tu celda "cierre_hora" en Config ya quedo corrompida
+// (Sheets la convirtio en fecha/hora en vez de dejarla como texto "14:00").
+// La relee, rescata la hora:minuto que tenga guardada y la vuelve a
+// escribir forzando formato de texto para que no se corrompa de nuevo.
+function repararCierreHora() {
+  const cfg = obtenerConfigCol(); // ya normaliza Date -> "HH:mm"
+  const horaActual = cfg.cierre_hora || '14:00';
+  actualizarConfigCol('cierre_hora', horaActual);
+  Logger.log('cierre_hora reparada como texto: ' + horaActual);
 }
 // Ejecutar UNA VEZ si tu planilla ya existia antes del catalogo de platos.
 // Crea la hoja "Platos" si falta y la precarga con todas las descripciones
