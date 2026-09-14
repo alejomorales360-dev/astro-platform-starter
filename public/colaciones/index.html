@@ -29,6 +29,7 @@
 <meta name="theme-color" content="#1565D8">
 <meta name="color-scheme" content="light">
 <title>Colaciones Semanales</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 /* ═══════════ ZONA DE CONFIGURACIÓN ═══════════ */
 </style>
@@ -790,9 +791,9 @@ function renderAdminReportes(){
   const toolbar = el('div',{class:'toolbar no-print'});
   const btnPdf = el('button',{class:'btn'},'📄 Exportar / imprimir PDF');
   btnPdf.onclick = ()=>window.print();
-  const btnCsv = el('button',{class:'btn'},'⬇️ Exportar CSV');
-  btnCsv.onclick = ()=>exportarCsv(semana, elegibles, pedidosSemana, menusSemana, diasEspeciales);
-  toolbar.append(btnPdf, btnCsv);
+  const btnXls = el('button',{class:'btn'},'⬇️ Exportar Excel');
+  btnXls.onclick = ()=>exportarExcel(semana, anotados, noAnotados, pedidosSemana, menusSemana, diasEspeciales);
+  toolbar.append(btnPdf, btnXls);
   box.appendChild(toolbar);
 
   const stats = el('div',{class:'stat-row'});
@@ -904,24 +905,57 @@ function personListCard(title, list, pedidosSemana, dias, diasEspeciales, menusP
   card.appendChild(twrap);
   return card;
 }
-function exportarCsv(semana, elegibles, pedidosSemana, menusSemana, diasEspeciales){
+// Exporta un solo .xlsx con 4 hojas: resumen a gran escala (por opción),
+// desglose por nombre de plato, y el registro de personas (anotados y sin
+// anotarse) cada uno en su propia hoja.
+function exportarExcel(semana, anotados, noAnotados, pedidosSemana, menusSemana, diasEspeciales){
   const dias = DIAS.filter(d=>menusSemana.some(m=>m.dia===d));
-  const encabezadosDias = dias.map(d=>d + (diasEspeciales&&diasEspeciales.has(d)?' (mejorado)':''));
-  const rows = [['Nombre','RUT','Tipo', ...encabezadosDias]];
-  elegibles.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
-    const row = [t.nombre, t.rut, t.tipo];
+  const nombreDia = d => d + (diasEspeciales&&diasEspeciales.has(d)?' (mejorado)':'');
+  const wb = XLSX.utils.book_new();
+
+  // Hoja 1: Resumen (a gran escala, por código de opción)
+  const codigos = Array.from(new Set(menusSemana.map(m=>m.opcion))).sort();
+  const filasResumen = [['Opción', ...dias.map(nombreDia)]];
+  codigos.forEach(cod=>{
+    filasResumen.push([cod, ...dias.map(d=>pedidosSemana.filter(p=>p.dia===d && p.opcion===cod).length)]);
+  });
+  filasResumen.push(['Total anotados', ...dias.map(d=>pedidosSemana.filter(p=>p.dia===d).length)]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasResumen), 'Resumen');
+
+  // Hoja 2: Desglose por nombre de plato y cantidad
+  const filasDesglose = [['Día','Opción','Plato','Cantidad']];
+  dias.forEach(d=>{
+    menusSemana.filter(m=>m.dia===d).sort((a,b)=>String(a.opcion).localeCompare(String(b.opcion))).forEach(m=>{
+      const n = pedidosSemana.filter(p=>p.dia===d && p.opcion===m.opcion).length;
+      filasDesglose.push([nombreDia(d), m.opcion, m.descripcion||'', n]);
+    });
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasDesglose), 'Desglose por plato');
+
+  // Hoja 3: Anotados, con el plato elegido cada día
+  const menusPorDia = {};
+  dias.forEach(d=>{ menusPorDia[d] = menusSemana.filter(m=>m.dia===d); });
+  const filasAnotados = [['Nombre','RUT','Tipo', ...dias.map(nombreDia)]];
+  anotados.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
+    const fila = [t.nombre, t.rut, t.tipo];
     dias.forEach(d=>{
       const p = pedidosSemana.find(x=>normRut(x.rut)===normRut(t.rut) && x.dia===d);
-      row.push(p?p.opcion:'Sin anotarse');
+      if(!p){ fila.push('Sin elegir'); return; }
+      const m = (menusPorDia[d]||[]).find(x=>String(x.opcion)===String(p.opcion));
+      fila.push(m ? `${p.opcion}: ${m.descripcion||''}` : p.opcion);
     });
-    rows.push(row);
+    filasAnotados.push(fila);
   });
-  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
-  const blob = new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8;'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `colaciones_${semana}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasAnotados), 'Anotados');
+
+  // Hoja 4: Sin anotarse
+  const filasSinAnotar = [['Nombre','RUT','Tipo']];
+  noAnotados.slice().sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre))).forEach(t=>{
+    filasSinAnotar.push([t.nombre, t.rut, t.tipo]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(filasSinAnotar), 'Sin anotarse');
+
+  XLSX.writeFile(wb, `colaciones_${semana}.xlsx`);
 }
 
 // ---------- dom helper ----------
